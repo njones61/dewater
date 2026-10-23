@@ -88,9 +88,9 @@
           <label class="span2" id="sw-field" hidden><span>Drawdown at the wells, s<sub>w</sub> (<span class="uL">m</span>)</span><input id="in-sw" type="number" step="any"></label>
           <label><span>R (<span class="uL">m</span>)</span><input id="in-R" type="number" step="any" value="500"></label>
           <label><span>Well radius, r<sub>w</sub> (<span class="uL">m</span>)</span><input id="in-rw" type="number" step="any" value="0.15"></label>
-          <p class="hint span2" id="R-note" hidden>Empirical, in meters with k in m/s, from the drawdown at the wells, s<sub>w</sub>.
-            Blank uses 1.25 times the drawdown the excavation needs. A design estimate: check the drawdown
-            the results give at the wells. Bear (1979), p. 306.</p>
+          <p class="hint span2" id="R-note" hidden>Empirical, in meters with k in m/s, from the drawdown at the wells, s<sub>w</sub>
+            (blank: 1.25 times the drawdown the excavation needs). <b>Find the least Q</b> and the design
+            curves solve R and s<sub>w</sub> together; a rate you type in uses the s<sub>w</sub> here. Bear (1979), p. 306.</p>
         </div>
         <p class="hint">The aquifer sits on a low-permeability layer, and the ground and the water
           table start out level. The water must come down to the excavation bottom, plus any extra
@@ -274,6 +274,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-  <script type="module" src="js/app.js?v=20"></script>
+  <script type="module" src="js/app.js?v=21"></script>
 </body>
 </html>

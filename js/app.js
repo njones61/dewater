@@ -150,12 +150,35 @@ function params() {
 // (Solving s_w and R together from the computed drawdown has several consistent answers, from
 // wells that barely interact to wells pumped dry, so the formula is used as it is in practice.)
 const swDefault = (p) => 1.25 * (p.H - p.target);
-function radius(p, k) {
-  const sw = numL("in-sw");
-  const s = sw > 0 ? sw : swDefault(p);
+const swField = (p) => (numL("in-sw") > 0 ? numL("in-sw") : swDefault(p));
+function radius(p, k, s = swField(p)) {
   if (p.Rmethod === "sichardt") return 3000 * s * Math.sqrt(k);
   if (p.Rmethod === "kusakin") return 575 * s * Math.sqrt(p.H * k);
   return p.R;
+}
+// The average drawdown at the wells (at their radius r_w) for equal rates qEach.
+function wellDrawdown(p, wells, qEach) {
+  const { h } = heads(wells.map((w) => ({ x: w.x + p.rw, y: w.y })), wells.map((w) => ({ ...w, q: qEach })), p);
+  return p.H - h.reduce((a, b) => a + b, 0) / h.length;
+}
+// The least rate with R from a formula: assume s_w, get R, find the least rate, read the
+// drawdown it makes at the wells, and repeat with that drawdown until the two agree. Because each
+// round meets the target exactly, this settles (in a few rounds, half-steps to damp the swing).
+// With R entered there is nothing to solve.
+function optimalWithR(cp, wells, p, k = p.k) {
+  if (p.Rmethod === "entered") return { ...optimalRate(cp, wells, { ...p, k }, p.target), R: p.R, sw: null, rounds: 0 };
+  let sw = swField(p), o = null, R = null, rounds = 0;
+  for (; rounds < 100; rounds++) {
+    R = radius(p, k, sw);
+    if (!(R > p.rw)) break;
+    o = optimalRate(cp, wells, { ...p, k, R }, p.target);
+    const sn = isFinite(o.qEach) ? Math.min(p.H, wellDrawdown({ ...p, k, R }, wells, o.qEach)) : p.H;
+    if (Math.abs(sn - sw) < 1e-4 * p.H) { sw = sn; break; }
+    sw = 0.5 * sw + 0.5 * sn;
+  }
+  R = radius(p, k, sw);
+  o = optimalRate(cp, wells, { ...p, k, R }, p.target);
+  return { ...o, R, sw, rounds: rounds + 1 };
 }
 function showR() {
   const p = params(), auto = p.Rmethod !== "entered";
@@ -456,7 +479,7 @@ function run() {
     setStatus("idle", "Draw or load the excavation to check the design.");
   } else if (state.optQ && Math.abs(p.Q - state.optQ) <= 1e-5 * state.optQ && Math.abs(hmax - p.target) < 1e-3) {
     // still the least rate found (in whatever units it is now shown)
-    setStatus("ok", `Least Q: ${fmtQ(state.optQ)}. The highest water in the excavation is exactly at the required level.`);
+    setStatus("ok", `Least Q: ${fmtQ(state.optQ)}. The highest water in the excavation is exactly at the required level.${state.optNote || ""}`);
   } else if (hmax <= p.target) {
     setStatus("ok", st ? `Dewatered: the water is at least ${fmtL(st.dbase - hmax - st.dexc, 2)} below the excavation bottom everywhere inside it.`
       : `Dewatered: the water is at or below the target head everywhere in the excavation.`);
@@ -876,8 +899,12 @@ $("btn-optimize").onclick = () => {
   const ring = excRing();
   if (!ring || !state.wells.length) return setStatus("idle", "The least Q needs an excavation and wells.");
   const r = ring.map(toXY), wells = state.wells.map((w) => toXY(w.marker.getLatLng()));
-  const opt = optimalRate(checkPoints(r), wells, p, p.target);
+  const opt = optimalWithR(checkPoints(r), wells, p);
   if (!opt || !isFinite(opt.Q)) return setStatus("bad", "No pumping rate works with these wells.");
+  // with R from a formula, the solved drawdown at the wells goes into the s_w field, so the
+  // rate below is checked with the R it was found with
+  if (opt.sw !== null) $("in-sw").value = trim(opt.sw / Lf());
+  state.optNote = opt.sw !== null ? ` R and s_w solved together (${opt.rounds} rounds): R = ${fmtL(opt.R, 0)}, s_w = ${fmtL(opt.sw, 2)}.` : "";
   // rounded up at six figures, so the entered rate still meets the target
   const qv = opt.Q / Qf(), mag = 10 ** (Math.floor(Math.log10(qv)) - 5);
   $("in-Q").value = trim(Math.ceil(qv / mag) * mag);
@@ -912,7 +939,7 @@ $("btn-curve").onclick = () => {
     if (!(n1 > n0)) return alertMsg("Enter a range of numbers of wells, smallest first.");
     for (let n = n0; n <= Math.min(n1, n0 + 300); n++) {
       const wells = ringWells(n, off).map(toXY);
-      const o = optimalRate(cp, wells, p, p.target);
+      const o = optimalWithR(cp, wells, p);
       curveRows.push({ x: n, Q: o.Q, qEach: o.qEach, feasible: o.feasible });
     }
   } else {
@@ -920,12 +947,14 @@ $("btn-curve").onclick = () => {
     const ku = K_UNITS[$("in-k-unit").value], k0 = num("in-kmin") * ku, k1 = num("in-kmax") * ku;
     if (!(k0 > 0 && k1 > k0)) return alertMsg("Enter a range of k, smallest first.");
     const wells = state.wells.map((w) => toXY(w.marker.getLatLng()));
+    const Rfix = state.last ? state.last.p.R : p.R;        // the comparison: R as it stands now
+    state.curveRfix = Rfix;
     for (let i = 0; i <= 30; i++) {
       const k = k0 * (k1 / k0) ** (i / 30);
-      const pk = { ...p, k, R: radius(p, k) };
-      if (!(pk.R > pk.rw)) continue;
-      const o = optimalRate(cp, wells, pk, p.target), of = optimalRate(cp, wells, { ...p, k }, p.target);
-      curveRows.push({ x: k, R: pk.R, Q: o.Q, qEach: o.qEach, feasible: o.feasible, Qfixed: of.Q });
+      const o = optimalWithR(cp, wells, p, k);
+      if (!(o.R > p.rw)) continue;
+      const of = optimalRate(cp, wells, { ...p, k, R: Rfix }, p.target);
+      curveRows.push({ x: k, R: o.R, Q: o.Q, qEach: o.qEach, feasible: o.feasible, Qfixed: of.Q });
     }
   }
   drawCurve();
@@ -960,7 +989,7 @@ function drawCurve() {
     .append("title").text((r) => `${byK ? `k = ${fmtNum(xv(r))} ${kUnitLabel()}, R = ${fmtL(r.R, 0)}` : `${r.x} wells`}: Q = ${fmtNum(r.Q / uq)} ${unit}${r.feasible ? "" : " (a well runs dry)"}`);
   if (auto) {
     const lg = svg.append("g").attr("transform", `translate(${m.l + 12},${m.t + 8})`);
-    [["#1F4E79", "", `R from ${params().Rmethod === "sichardt" ? "Sichardt" : "Kusakin"} (grows with √k)`], ["#8a96a3", "6,4", `R fixed at ${fmtL(params().R, 0)}`]].forEach(([c, dash, t], i) => {
+    [["#1F4E79", "", `R from ${params().Rmethod === "sichardt" ? "Sichardt" : "Kusakin"} (grows with √k)`], ["#8a96a3", "6,4", `R fixed at ${fmtL(state.curveRfix, 0)}`]].forEach(([c, dash, t], i) => {
       lg.append("line").attr("x1", 0).attr("x2", 26).attr("y1", i * 18).attr("y2", i * 18).attr("stroke", c).attr("stroke-width", 2.5).attr("stroke-dasharray", dash);
       lg.append("text").attr("x", 32).attr("y", i * 18 + 4).text(t);
     });
