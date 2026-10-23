@@ -15,6 +15,33 @@ const imagery = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/service
 imagery.addTo(map);
 L.control.layers({ Imagery: imagery, Streets: street }, null, { position: "topright" }).addTo(map);
 L.control.scale({ imperial: true, metric: true, position: "bottomleft" }).addTo(map);
+
+// "Fit": zoom to the excavation, the wells, and the area the results cover.
+const FitControl = L.Control.extend({
+  options: { position: "topleft" },
+  onAdd() {
+    const bar = L.DomUtil.create("div", "leaflet-bar");
+    const a = L.DomUtil.create("a", "fit-btn", bar);
+    a.href = "#"; a.title = "Fit the site in view"; a.setAttribute("role", "button"); a.setAttribute("aria-label", "Fit the site in view");
+    a.innerHTML = '<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
+    L.DomEvent.on(a, "click", (e) => { L.DomEvent.stop(e); fitSite(); });
+    L.DomEvent.disableClickPropagation(bar);
+    return bar;
+  },
+});
+new FitControl().addTo(map);
+function fitSite() {
+  let b = null;
+  const add = (x) => { b = b ? b.extend(x) : L.latLngBounds(x, x); };
+  if (state.excavation) { const eb = state.excavation.getBounds(); add(eb.getSouthWest()); add(eb.getNorthEast()); }
+  state.wells.forEach((w) => add(w.marker.getLatLng()));
+  if (state.last && state.origin) {
+    const [x0, x1, y0, y1] = state.last.box;
+    add(toLL({ x: x0, y: y0 })); add(toLL({ x: x1, y: y1 }));
+  }
+  if (!b) return tip("Nothing to fit yet: draw an excavation or add wells.", 2500);
+  map.fitBounds(b, { padding: [24, 24], maxZoom: 19 });
+}
 map.pm.setGlobalOptions({ snappable: true, allowSelfIntersection: false });
 map.pm.setLang("en");
 
