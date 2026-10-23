@@ -740,8 +740,7 @@ function drawSection() {
       .attr("paint-order", "stroke").attr("stroke", "#fff").attr("stroke-width", 4).attr("stroke-linejoin", "round").text(label);
   };
   if (st) {
-    if (terr) hline(st.dbase, "#8a6d3b", "2,3", "", false, 1);       // named in the section's title
-    else hline(st.dbase, "#8a6d3b", "", "Ground");
+    if (!terr) hline(st.dbase, "#8a6d3b", "", "Ground");
     hline(p.H, "#5b6875", "6,4", `Water table before pumping, ${fmtL(st.dwt, 1)} deep`, !!terr);
     hline(p.target, "#E8582C", "6,4", `Required level, ${fmtL(st.dexc + st.margin, 1)} deep`);
   } else {
@@ -752,7 +751,8 @@ function drawSection() {
   svg.append("path").datum(prof).attr("fill", "none").attr("stroke", "#1F4E79").attr("stroke-width", 2.5)
     .attr("d", d3.line().x((q) => x(q.d)).y((q) => y(q.h)));
   near.forEach((w) => {
-    svg.append("rect").attr("x", x(w.d) - 3).attr("width", 6).attr("y", y(st ? st.dbase : zTop)).attr("height", y(0) - y(st ? st.dbase : zTop))
+    const wt = terr ? tz(w.d) : st ? st.dbase : zTop;          // the casing reaches the ground
+    svg.append("rect").attr("x", x(w.d) - 3).attr("width", 6).attr("y", y(wt)).attr("height", y(0) - y(wt))
       .attr("fill", "#fff").attr("stroke", "#1F4E79").attr("stroke-width", 1.5);
   });
   svg.append("text").attr("class", "axis-title").attr("x", m.l + 4).attr("y", Ht - 4).text("A");
@@ -780,7 +780,7 @@ function drawSection() {
       .text(st ? `${fmtL(st.dbase - top.h, 2)} deep` : `h = ${fmtL(top.h, 2)}`);
   }
   $("section-title").textContent = `Cross section A–A′ (${fmtL(len, 0)})${near.length ? ` · ${near.length} well${near.length > 1 ? "s" : ""} on the line` : ""}`
-    + (terr ? " · dotted line: the average ground, which the calculation treats as level" : "");
+    + (terr ? " · ground from terrain data; the calculation treats it as level" : "");
 }
 window.addEventListener("resize", () => drawSection());
 
