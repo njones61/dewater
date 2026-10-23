@@ -78,7 +78,7 @@ function setExcavation(layer, fit = true) {
   if (state.excavation && state.excavation !== layer) map.removeLayer(state.excavation);
   state.excavation = layer;
   layer.setStyle(EXC_STYLE);
-  layer.on("pm:edit pm:dragend", () => { updateExcInfo(); schedule(); });
+  layer.on("pm:edit pm:dragend pm:rotateend", () => { updateExcInfo(); schedule(); });
   layer.on("pm:remove", () => { state.excavation = null; updateExcInfo(); schedule(); });
   setOrigin(layer.getBounds().getCenter());
   if (fit) map.fitBounds(layer.getBounds().pad(1.2));
@@ -119,9 +119,26 @@ $("btn-draw").onclick = () => {
   map.pm.enableDraw("Polygon", { templineStyle: EXC_STYLE, hintlineStyle: { color: "#E8582C", dashArray: "5,5" }, pathOptions: EXC_STYLE });
   tip("Click the corners of the excavation. Click the first corner to finish.");
 };
+$("btn-rect").onclick = () => {
+  setAddMode(false);
+  map.pm.enableDraw("Rectangle", { pathOptions: EXC_STYLE });
+  tip("Drag a box for the excavation. Use Rotate to turn it to match the site.");
+};
+$("btn-rotate").onclick = () => {
+  if (!state.excavation) return;
+  const on = state.excavation.pm.rotateEnabled && state.excavation.pm.rotateEnabled();
+  if (on) { state.excavation.pm.disableRotate(); $("btn-rotate").textContent = "Rotate"; tip(null); }
+  else { state.excavation.pm.enableRotate(); $("btn-rotate").textContent = "Done rotating"; tip("Drag a corner to rotate the excavation."); }
+};
 map.on("pm:create", (e) => {
   tip(null);
-  if (e.shape === "Polygon") setExcavation(e.layer, false);
+  if (e.shape === "Polygon" || e.shape === "Rectangle") setExcavation(e.layer, false);
+  else if (e.shape === "Line" && state.secDrawing) {
+    state.secDrawing = false;
+    const ll = e.layer.getLatLngs();
+    map.removeLayer(e.layer);
+    setSection(ll[0], ll[ll.length - 1]);
+  }
 });
 $("btn-edit").onclick = () => {
   if (!state.excavation) return;
@@ -265,6 +282,7 @@ function run() {
 
   state.last = { p, box, nx, ny, h, ring, wells, hmax, at, hw, qEach };
   drawResults();
+  drawSection();
 
   // status and numbers
   const rows = [
@@ -408,6 +426,121 @@ const levelDigits = (lv) => (lv.length > 1 && lv[1] - lv[0] < 1 ? 1 : 0);
 $("in-opacity").addEventListener("input", () => fill.setOpacity(parseFloat($("in-opacity").value)));
 ["in-k", "in-k-unit", "in-H", "in-R", "in-target", "in-rw", "in-Q", "in-Q-unit"].forEach((id) => $(id).addEventListener("input", () => schedule(250)));
 
+// ------------------------------------------------------------------ cross section
+const secLayer = L.layerGroup().addTo(map);
+state.section = null;          // [LatLng A, LatLng B]
+state.secDrawing = false;
+
+function setSection(a, b) {
+  state.section = [a, b];
+  $("section-panel").hidden = false;
+  $("btn-sec-close").hidden = false;
+  $("legend").style.bottom = "300px";
+  drawSection();
+  persist();
+}
+function hideSection() {
+  state.section = null;
+  secLayer.clearLayers();
+  $("section-panel").hidden = true;
+  $("btn-sec-close").hidden = true;
+  $("legend").style.bottom = "";
+  persist();
+}
+// A line through the excavation's middle (or the wells'), east–west or north–south, reaching
+// past them on both sides.
+function centerSection(dir) {
+  const pts = [...(excRing() || []), ...state.wells.map((w) => w.marker.getLatLng())];
+  if (!pts.length) { alertMsg("Draw an excavation or add wells first."); return; }
+  if (!state.origin) setOrigin(L.latLngBounds(pts).getCenter());
+  const xy = pts.map(toXY), c = state.excavation ? toXY(state.excavation.getBounds().getCenter()) : toXY(L.latLngBounds(pts).getCenter());
+  const xs = xy.map((p) => p.x), ys = xy.map((p) => p.y);
+  const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), 20);
+  const half = 0.5 * span + Math.max(0.9 * span, 60);
+  const [a, b] = dir === "ew" ? [{ x: c.x - half, y: c.y }, { x: c.x + half, y: c.y }] : [{ x: c.x, y: c.y + half }, { x: c.x, y: c.y - half }];
+  setSection(toLL(a), toLL(b));
+}
+$("btn-sec-ew").onclick = () => centerSection("ew");
+$("btn-sec-ns").onclick = () => centerSection("ns");
+$("btn-sec-draw").onclick = () => {
+  setAddMode(false);
+  state.secDrawing = true;
+  map.pm.enableDraw("Line", { templineStyle: { color: "#1d2733", dashArray: "6,4" }, hintlineStyle: { color: "#1d2733", dashArray: "6,4" } });
+  tip("Click the two ends of the section line. Click the last point again to finish.");
+};
+$("btn-sec-close").onclick = hideSection;
+$("btn-sec-x").onclick = hideSection;
+
+function drawSection() {
+  secLayer.clearLayers();
+  const el = $("section-chart");
+  if (!state.section || !state.last || !state.origin) { el.innerHTML = ""; return; }
+  const [A, B] = state.section, a = toXY(A), b = toXY(B);
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  if (!(len > 0)) return;
+  // the line on the map, with its ends labeled
+  L.polyline([A, B], { color: "#1d2733", weight: 2.5, dashArray: "8,5", interactive: false }).addTo(secLayer);
+  [["A", A], ["A′", B]].forEach(([t, ll]) => L.tooltip({ permanent: true, direction: "center", className: "sec-label", interactive: false }).setLatLng(ll).setContent(t).addTo(secLayer));
+
+  const { p, wells, qEach, ring } = state.last;
+  const W = wells.map((w) => ({ ...w, q: qEach }));
+  const N = 400, ux = (b.x - a.x) / len, uy = (b.y - a.y) / len;
+  const pts = d3.range(N + 1).map((i) => ({ x: a.x + ux * len * i / N, y: a.y + uy * len * i / N }));
+  const { h } = heads(pts, W, p);
+  const prof = pts.map((q, i) => ({ d: len * i / N, h: h[i], inExc: ring ? inside(q, ring) : false }));
+  // wells within a few percent of the line's length of it, at their place along it
+  const near = wells.map((w, i) => ({ i, d: (w.x - a.x) * ux + (w.y - a.y) * uy, off: Math.abs(-(w.x - a.x) * uy + (w.y - a.y) * ux) }))
+    .filter((w) => w.d >= 0 && w.d <= len && w.off <= Math.max(0.04 * len, 3 * p.rw));
+  // the excavation's stretches along the line
+  const spans = [];
+  prof.forEach((q, i) => {
+    if (q.inExc && (i === 0 || !prof[i - 1].inExc)) spans.push([q.d, q.d]);
+    if (q.inExc) spans[spans.length - 1][1] = q.d;
+  });
+
+  el.innerHTML = "";
+  const Wd = el.clientWidth || 800, Ht = 240, m = { l: 56, r: 16, t: 10, b: 34 };
+  const x = d3.scaleLinear().domain([0, len]).range([m.l, Wd - m.r]);
+  const y = d3.scaleLinear().domain([0, p.H * 1.08]).range([Ht - m.b, m.t]);
+  const svg = d3.select(el).append("svg").attr("class", "chart").attr("width", Wd).attr("height", Ht);
+  // saturated soil under the water level
+  svg.append("path").datum(prof).attr("fill", "#cfe3f1")
+    .attr("d", d3.area().x((q) => x(q.d)).y0(y(0)).y1((q) => y(q.h)));
+  spans.forEach(([d0, d1]) => {
+    svg.append("rect").attr("x", x(d0)).attr("width", Math.max(1, x(d1) - x(d0))).attr("y", y(p.H * 1.08)).attr("height", y(0) - y(p.H * 1.08))
+      .attr("fill", "rgba(232,88,44,.10)").attr("stroke", "#E8582C").attr("stroke-dasharray", "4,3");
+    svg.append("text").attr("x", (x(d0) + x(d1)) / 2).attr("y", y(p.H * 1.04)).attr("text-anchor", "middle").attr("fill", "#b5441f").text("Excavation");
+  });
+  svg.append("g").attr("transform", `translate(0,${Ht - m.b})`).call(d3.axisBottom(x).ticks(10));
+  svg.append("g").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(5));
+  const hline = (v, col, dash, label) => {
+    svg.append("line").attr("x1", m.l).attr("x2", Wd - m.r).attr("y1", y(v)).attr("y2", y(v)).attr("stroke", col).attr("stroke-width", 1.5).attr("stroke-dasharray", dash);
+    svg.append("text").attr("x", Wd - m.r - 4).attr("y", y(v) - 4).attr("text-anchor", "end").attr("fill", col).text(label);
+  };
+  hline(p.H, "#5b6875", "6,4", `Static level, H = ${fmt(p.H, 1)} m`);
+  hline(p.target, "#E8582C", "6,4", `Target, ${fmt(p.target, 1)} m`);
+  svg.append("line").attr("x1", m.l).attr("x2", Wd - m.r).attr("y1", y(0)).attr("y2", y(0)).attr("stroke", "#1d2733").attr("stroke-width", 3);
+  svg.append("path").datum(prof).attr("fill", "none").attr("stroke", "#1F4E79").attr("stroke-width", 2.5)
+    .attr("d", d3.line().x((q) => x(q.d)).y((q) => y(q.h)));
+  near.forEach((w) => {
+    svg.append("rect").attr("x", x(w.d) - 3).attr("width", 6).attr("y", y(p.H * 1.08)).attr("height", y(0) - y(p.H * 1.08))
+      .attr("fill", "#fff").attr("stroke", "#1F4E79").attr("stroke-width", 1.5);
+  });
+  svg.append("text").attr("class", "axis-title").attr("x", m.l + 4).attr("y", Ht - 4).text("A");
+  svg.append("text").attr("class", "axis-title").attr("x", Wd - m.r - 4).attr("y", Ht - 4).attr("text-anchor", "end").text("A′");
+  svg.append("text").attr("class", "axis-title").attr("x", (m.l + Wd - m.r) / 2).attr("y", Ht - 4).attr("text-anchor", "middle").text("Distance along the section (m)");
+  svg.append("text").attr("class", "axis-title").attr("transform", `translate(14,${(m.t + Ht - m.b) / 2}) rotate(-90)`).attr("text-anchor", "middle").text("Head, h (m)");
+  // the highest water inside the excavation along this line
+  const inEx = prof.filter((q) => q.inExc);
+  if (inEx.length) {
+    const top = inEx.reduce((u, v) => (v.h > u.h ? v : u));
+    svg.append("circle").attr("cx", x(top.d)).attr("cy", y(top.h)).attr("r", 4.5).attr("fill", top.h > p.target ? "#b3261e" : "#1e7a46");
+    svg.append("text").attr("x", x(top.d)).attr("y", y(top.h) - 9).attr("text-anchor", "middle").attr("fill", "#1d2733").text(`h = ${fmt(top.h, 2)} m`);
+  }
+  $("section-title").textContent = `Cross section A–A′ (${fmt(len, 0)} m)${near.length ? ` · ${near.length} well${near.length > 1 ? "s" : ""} on the line` : ""}`;
+}
+window.addEventListener("resize", () => drawSection());
+
 // ------------------------------------------------------------------ least Q
 $("btn-optimize").onclick = () => {
   const p = params(), err = checkParams({ ...p, Q: 0 });
@@ -498,6 +631,7 @@ function project() {
     wells: state.wells.map((w) => { const ll = w.marker.getLatLng(); return [ll.lat, ll.lng]; }),
     inputs: Object.fromEntries(INPUTS.map((id) => [id, $(id).value])),
     view: { center: map.getCenter(), zoom: map.getZoom() },
+    section: state.section ? state.section.map((q) => [q.lat, q.lng]) : null,
   };
 }
 function restore(pr, fit = true) {
@@ -512,6 +646,7 @@ function restore(pr, fit = true) {
   (pr.wells || []).forEach(([lat, lng]) => addWell(L.latLng(lat, lng), false));
   updateWellsInfo();
   if (!fit && pr.view) map.setView(pr.view.center, pr.view.zoom);
+  if (pr.section) setSection(L.latLng(...pr.section[0]), L.latLng(...pr.section[1]));
   schedule();
 }
 $("btn-save").onclick = () => download("dewater_project.json", JSON.stringify(project(), null, 1), "application/json");
@@ -558,7 +693,7 @@ function readFile(file, cb) { if (!file) return; const r = new FileReader(); r.o
 
 document.querySelectorAll("[data-close]").forEach((b) => (b.onclick = () => b.closest("dialog").close()));
 $("btn-help").onclick = () => $("dlg-help").showModal();
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") { setAddMode(false); map.pm.disableDraw(); tip(null); } });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { setAddMode(false); state.secDrawing = false; map.pm.disableDraw(); tip(null); } });
 
 // ------------------------------------------------------------------ start
 try {

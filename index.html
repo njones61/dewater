@@ -35,7 +35,9 @@
         <p class="hint">Draw the excavation outline on the map, or load a GeoJSON polygon.</p>
         <div class="row">
           <button id="btn-draw" class="primary">Draw outline</button>
+          <button id="btn-rect" class="primary">Draw rectangle</button>
           <button id="btn-edit">Edit</button>
+          <button id="btn-rotate">Rotate</button>
           <label class="file-btn">Load GeoJSON<input id="file-geojson" type="file" accept=".geojson,.json" hidden></label>
         </div>
         <div class="row">
@@ -108,9 +110,22 @@
         <label class="range">Opacity<input id="in-opacity" type="range" min="0.1" max="1" step="0.05" value="0.55"></label>
       </section>
 
+      <!-- Cross section -->
+      <section class="step" id="step-section">
+        <h2><span class="num">6</span>Cross section</h2>
+        <p class="hint">A profile of the water level along a line: east–west or north–south through
+          the middle of the excavation, or any line you draw.</p>
+        <div class="row">
+          <button id="btn-sec-ew">East–west</button>
+          <button id="btn-sec-ns">North–south</button>
+          <button id="btn-sec-draw">Draw a line</button>
+          <button id="btn-sec-close" hidden>Hide</button>
+        </div>
+      </section>
+
       <!-- 6. Design curve -->
       <section class="step" id="step-curve">
-        <h2><span class="num">6</span>Design curve</h2>
+        <h2><span class="num">7</span>Design curve</h2>
         <p class="hint">The least total Q for rings of n wells at the offset above. Past some n,
           more wells barely lower Q.</p>
         <div class="fields two">
@@ -137,6 +152,10 @@
       <div id="map"></div>
       <div class="legend" id="legend" hidden></div>
       <div class="maptip" id="maptip" hidden></div>
+      <div class="section-panel" id="section-panel" hidden>
+        <div class="section-head"><span id="section-title">Cross section A–A′</span><button class="close" id="btn-sec-x" title="Hide">×</button></div>
+        <div id="section-chart"></div>
+      </div>
     </div>
   </main>
 
@@ -172,11 +191,14 @@
         drops to zero): add wells or move them out.</p>
       <h3>Steps</h3>
       <ol>
-        <li>Find the site (search, or zoom and pan) and draw the excavation outline, or load a
-          GeoJSON polygon.</li>
+        <li>Find the site (search, or zoom and pan) and draw the excavation outline, drag a
+          rectangle (Rotate turns it to match the site), or load a GeoJSON polygon.</li>
         <li>Enter the aquifer properties and the target head.</li>
         <li>Click to place wells, or generate a ring at an offset from the edge.</li>
         <li>Enter a pumping rate and check the contours, or find the least rate that works.</li>
+        <li>Check a cross section: east–west or north–south through the excavation, or any line
+          you draw. It shows the water level against the static level and the target, with the
+          excavation and the wells on the line.</li>
         <li>Use the design curve to choose the number of wells.</li>
       </ol>
       <p class="hint">The map shows head, drawdown, or head below the target as contours, and

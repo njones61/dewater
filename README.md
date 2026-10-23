@@ -4,12 +4,14 @@ Design a dewatering well system for an excavation in an unconfined aquifer, in t
 
 **Use it:** https://jonesgeo.com/dewater/
 
-1. Find the site and draw the excavation outline on the map, or load a GeoJSON polygon.
+1. Find the site and draw the excavation outline on the map, drag a rectangle (and rotate it to
+   match the site), or load a GeoJSON polygon.
 2. Enter the aquifer properties (k, H, R) and the target head inside the excavation.
 3. Click to place wells, or generate a ring of wells at an offset from the edge.
 4. Enter a total pumping rate and check the contours, or find the least rate that dewaters the
    excavation.
-5. Compute the design curve, the least total rate against the number of wells, to choose how many
+5. Check cross sections of the water level: east–west, north–south, or along any line you draw.
+6. Compute the design curve, the least total rate against the number of wells, to choose how many
    wells to use.
 
 Projects save to a small JSON file (the outline, the wells, and the inputs) and open again later.
