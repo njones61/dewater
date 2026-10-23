@@ -394,6 +394,9 @@ function run() {
     setStatus("bad", `${dryWells.length} well${dryWells.length > 1 ? "s" : ""} pumped dry (shown red): the rate is more than the aquifer can deliver there. Add wells or lower Q.`);
   } else if (!ring) {
     setStatus("idle", "Draw or load the excavation to check the design.");
+  } else if (state.optQ && Math.abs(p.Q - state.optQ) <= 1e-5 * state.optQ && Math.abs(hmax - p.target) < 1e-3) {
+    // still the least rate found (in whatever units it is now shown)
+    setStatus("ok", `Least Q: ${fmtQ(state.optQ)}. The highest water in the excavation is exactly at the required level.`);
   } else if (hmax <= p.target) {
     setStatus("ok", st ? `Dewatered: the water is at least ${fmtL(st.dbase - hmax - st.dexc, 2)} below the excavation bottom everywhere inside it.`
       : `Dewatered: the water is at or below the target head everywhere in the excavation.`);
@@ -761,8 +764,8 @@ $("btn-optimize").onclick = () => {
   // rounded up at six figures, so the entered rate still meets the target
   const qv = opt.Q / Qf(), mag = 10 ** (Math.floor(Math.log10(qv)) - 5);
   $("in-Q").value = trim(Math.ceil(qv / mag) * mag);
+  state.optQ = opt.feasible ? opt.Q : null;
   run();
-  if (opt.feasible) setStatus("ok", `Least Q found: ${fmtQ(opt.Q)}. The highest water in the excavation is exactly at the required level.`);
   if (!opt.feasible) setStatus("bad", "The least rate that dewaters the excavation would pump a well dry. Add wells, or move them farther out.");
 };
 
