@@ -6,7 +6,8 @@ Design a dewatering well system for an excavation in an unconfined aquifer, in t
 
 1. Find the site and draw the excavation outline on the map, drag a rectangle (and rotate it to
    match the site), or load a GeoJSON polygon.
-2. Enter the aquifer properties (k, H, R) and the target head inside the excavation.
+2. Enter the site as depths below ground (water table, bottom of the aquifer, excavation, and the
+   extra depth the water must reach below its bottom), or as H and the target head; then k and R.
 3. Click to place wells, or generate a ring of wells at an offset from the edge.
 4. Enter a total pumping rate and check the contours, or find the least rate that dewaters the
    excavation.
