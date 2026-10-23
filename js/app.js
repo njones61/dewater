@@ -78,7 +78,7 @@ const Qf = () => Q_UNITS[$("in-Q-unit").value];
 const Qn = () => $("in-Q-unit").selectedOptions[0].textContent;
 const numL = (id) => num(id) * Lf();                              // a length input, in meters
 const fmtL = (v, d) => `${fmt(v / Lf(), d)} ${Ln()}`;
-const LEN_INPUTS = ["in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-H", "in-target", "in-R", "in-rw", "in-offset", "in-interval"];
+const LEN_INPUTS = ["in-sw", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-H", "in-target", "in-R", "in-rw", "in-offset", "in-interval"];
 const trim = (v) => String(+v.toPrecision(6));
 
 function setLenLabels() { document.querySelectorAll(".uL").forEach((e) => (e.textContent = Ln())); }
@@ -145,9 +145,14 @@ function params() {
   return p;
 }
 // The radius of influence from the empirical formulas (Bear 1979, p. 306), in meters with k in
-// m/s; s is the drawdown the design needs, H minus the target head.
+// m/s and s the drawdown at the wells, s_w: entered, or by default 1.25 times the drawdown the
+// excavation needs (H minus the target head). It is a design estimate, one number, so R is too.
+// (Solving s_w and R together from the computed drawdown has several consistent answers, from
+// wells that barely interact to wells pumped dry, so the formula is used as it is in practice.)
+const swDefault = (p) => 1.25 * (p.H - p.target);
 function radius(p, k) {
-  const s = p.H - p.target;
+  const sw = numL("in-sw");
+  const s = sw > 0 ? sw : swDefault(p);
   if (p.Rmethod === "sichardt") return 3000 * s * Math.sqrt(k);
   if (p.Rmethod === "kusakin") return 575 * s * Math.sqrt(p.H * k);
   return p.R;
@@ -157,6 +162,8 @@ function showR() {
   $("in-R").readOnly = auto;
   $("R-note").hidden = !auto;
   if (auto && Number.isFinite(p.R)) $("in-R").value = trim(p.R / Lf());
+  $("sw-field").hidden = !auto;
+  if (Number.isFinite(p.H - p.target)) $("in-sw").placeholder = `${trim(swDefault(p) / Lf())} (1.25 × needed)`;
 }
 $("in-R-method").addEventListener("change", () => { showR(); schedule(); });
 
@@ -436,6 +443,11 @@ function run() {
     rows.push(["Target head", fmtL(p.target, 2)]);
     rows.push(["Margin (target − highest)", fmtL(p.target - hmax, 2)]);
   }
+  if (p.Rmethod !== "entered") {
+    const sw = numL("in-sw") > 0 ? numL("in-sw") : swDefault(p);
+    rows.push(["R from the formula", fmtL(p.R, 0)]);
+    rows.push(["Drawdown at the wells: assumed / computed", `${fmt(sw / Lf(), 2)} / ${fmtL(p.H - hw.reduce((a, b) => a + b, 0) / hw.length, 2)}`]);
+  }
   rows.push(st ? ["Deepest water, at a well", `${fmtL(st.dbase - Math.min(...hw), 2)} below ground`] : ["Lowest head at a well", fmtL(Math.min(...hw), 2)]);
   $("results").innerHTML = rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("");
   if (dryWells.length) {
@@ -610,7 +622,7 @@ buildRampPicker();
 
 ["in-field", "in-interval", "in-fill", "in-dewatered", "in-ramp", "in-ramp-rev"].forEach((id) => $(id).addEventListener("change", () => { drawResults(); persist(); }));
 $("in-opacity").addEventListener("input", () => fill.setOpacity(parseFloat($("in-opacity").value)));
-["in-k", "in-k-unit", "in-H", "in-R", "in-target", "in-rw", "in-Q", "in-Q-unit", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev"]
+["in-sw", "in-k", "in-k-unit", "in-H", "in-R", "in-target", "in-rw", "in-Q", "in-Q-unit", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev"]
   .forEach((id) => $(id).addEventListener("input", () => { updateDerived(); schedule(250); }));
 
 // ------------------------------------------------------------------ terrain
@@ -986,7 +998,7 @@ $("btn-export-contours").onclick = () => {
   download("contours.geojson", JSON.stringify(fc), "application/geo+json");
 };
 
-const INPUTS = ["in-R-method", "in-curve-var", "in-kmin", "in-kmax", "in-k", "in-k-unit", "in-H", "in-R", "in-target", "in-rw", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-Q", "in-Q-unit", "in-offset", "in-nwells", "in-field", "in-interval", "in-nmin", "in-nmax", "in-ramp"];
+const INPUTS = ["in-sw", "in-R-method", "in-curve-var", "in-kmin", "in-kmax", "in-k", "in-k-unit", "in-H", "in-R", "in-target", "in-rw", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-Q", "in-Q-unit", "in-offset", "in-nwells", "in-field", "in-interval", "in-nmin", "in-nmax", "in-ramp"];
 function project() {
   const f = excFeature();
   return {
