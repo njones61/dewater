@@ -19,6 +19,9 @@ The ground elevation can be read from open terrain data (AWS Terrain Tiles; USGS
 US), averaged over the excavation, and the cross section then shows the actual ground profile.
 The calculation still treats the ground and the initial water table as level.
 
+Lengths are in meters or feet; k and Q each have their own unit list, and every flow rate shown
+uses Q's unit. Changing a unit converts the values already entered.
+
 Projects save to a small JSON file (the outline, the wells, and the inputs) and open again later.
 Wells export as CSV, contours as GeoJSON.
 

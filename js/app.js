@@ -1,5 +1,5 @@
 // app.js — the map, the panel, and the drawing of results. The calculation is in model.js.
-import { heads, optimalRate, grid, inside, densify, GPM_PER_M3S } from "./model.js";
+import { heads, optimalRate, grid, inside, densify } from "./model.js";
 import { elevations } from "./terrain.js";
 
 /* global L, turf, d3 */
@@ -38,6 +38,43 @@ const marks = L.layerGroup().addTo(map);
 const $ = (id) => document.getElementById(id);
 const num = (id) => parseFloat($(id).value);
 
+// ------------------------------------------------------------------ units
+// The calculation is in SI. Lengths are entered and shown in one unit for the whole app (meters or
+// feet); k and Q each have their own unit, and every flow rate shown uses Q's unit.
+const LEN = { m: 1, ft: 0.3048 };
+const K_UNITS = { cms: 0.01, ms: 1, mday: 1 / 86400, fts: 0.3048, ftday: 0.3048 / 86400, gpdft2: 0.003785411784 / 86400 / 0.09290304 };
+const Q_UNITS = { m3s: 1, m3day: 1 / 86400, lps: 0.001, gpm: 0.003785411784 / 60, cfs: 0.028316846592, ft3day: 0.028316846592 / 86400, mgd: 3785.411784 / 86400 };
+const lenUnit = () => document.querySelector('input[name="lenunit"]:checked').value;
+const Lf = () => LEN[lenUnit()];                                  // meters per display length unit
+const Ln = () => lenUnit();
+const Qf = () => Q_UNITS[$("in-Q-unit").value];
+const Qn = () => $("in-Q-unit").selectedOptions[0].textContent;
+const numL = (id) => num(id) * Lf();                              // a length input, in meters
+const fmtL = (v, d) => `${fmt(v / Lf(), d)} ${Ln()}`;
+const LEN_INPUTS = ["in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-H", "in-target", "in-R", "in-rw", "in-offset", "in-interval"];
+const trim = (v) => String(+v.toPrecision(6));
+
+function setLenLabels() { document.querySelectorAll(".uL").forEach((e) => (e.textContent = Ln())); }
+// Switching a unit converts the values already entered, so the design itself doesn't change.
+let lastLen = "m";
+document.querySelectorAll('input[name="lenunit"]').forEach((r) => r.addEventListener("change", () => {
+  const f = LEN[lastLen] / Lf();
+  LEN_INPUTS.forEach((id) => { const v = parseFloat($(id).value); if (Number.isFinite(v)) $(id).value = trim(v * f); });
+  lastLen = lenUnit();
+  setLenLabels(); updateDerived(); updateExcInfo(); schedule();
+}));
+for (const [id, units] of [["in-k", K_UNITS], ["in-Q", Q_UNITS]]) {
+  const sel = $(`${id}-unit`);
+  sel.dataset.prev = sel.value;
+  sel.addEventListener("change", () => {
+    const v = parseFloat($(id).value);
+    if (Number.isFinite(v)) $(id).value = trim(v * units[sel.dataset.prev] / units[sel.value]);
+    sel.dataset.prev = sel.value;
+    schedule();
+    if (curveRows.length && $("dlg-curve").open) drawCurve();
+  });
+}
+
 // ------------------------------------------------------------------ local frame (meters)
 // An equirectangular frame centered on the site: accurate to a small fraction of a percent over
 // the few kilometers a dewatering design covers.
@@ -61,27 +98,27 @@ function toLL(p) {
 const mode = () => document.querySelector('input[name="mode"]:checked').value;
 function params() {
   const p = {
-    k: num("in-k") * parseFloat($("in-k-unit").value),
-    R: num("in-R"), rw: num("in-rw"),
-    Q: num("in-Q") * parseFloat($("in-Q-unit").value),
+    k: num("in-k") * K_UNITS[$("in-k-unit").value],
+    R: numL("in-R"), rw: numL("in-rw"),
+    Q: num("in-Q") * Qf(),
     site: null,
   };
   if (mode() === "depth") {
-    const site = { dwt: num("in-dwt"), dbase: num("in-dbase"), dexc: num("in-dexc"), margin: num("in-margin") || 0, gelev: num("in-gelev") };
+    const site = { dwt: numL("in-dwt"), dbase: numL("in-dbase"), dexc: numL("in-dexc"), margin: numL("in-margin") || 0, gelev: numL("in-gelev") };
     p.site = site;
     p.H = site.dbase - site.dwt;
     p.target = site.dbase - (site.dexc + site.margin);
   } else {
-    p.H = num("in-H");
-    p.target = num("in-target");
+    p.H = numL("in-H");
+    p.target = numL("in-target");
   }
   return p;
 }
 function updateDerived() {
   const p = params(), s = p.site;
   if (s && [s.dwt, s.dbase, s.dexc].every(Number.isFinite)) {
-    $("derived").textContent = `Saturated thickness H = ${fmt(p.H, 2)} m. The water must come down to ${fmt(s.dexc + s.margin, 2)} m below ground: a head of ${fmt(p.target, 2)} m above the low-k layer.`
-      + (Number.isFinite(s.gelev) ? ` Water table at elevation ${fmt(s.gelev - s.dwt, 2)}; required level ${fmt(s.gelev - s.dexc - s.margin, 2)}.` : "");
+    $("derived").textContent = `Saturated thickness H = ${fmtL(p.H, 2)}. The water must come down to ${fmtL(s.dexc + s.margin, 2)} below ground: a head of ${fmtL(p.target, 2)} above the low-k layer.`
+      + (Number.isFinite(s.gelev) ? ` Water table at elevation ${fmt((s.gelev - s.dwt) / Lf(), 2)}; required level ${fmt((s.gelev - s.dexc - s.margin) / Lf(), 2)}.` : "");
   } else $("derived").textContent = "";
 }
 document.querySelectorAll('input[name="mode"]').forEach((r) => r.addEventListener("change", () => {
@@ -141,7 +178,9 @@ function updateExcInfo() {
   const f = excFeature();
   if (!f) { $("exc-info").textContent = "No excavation yet."; return; }
   const a = turf.area(f), per = turf.length(turf.polygonToLine(f), { units: "meters" });
-  $("exc-info").textContent = `Area ${fmt(a, 0)} m² (${fmt(a * 10.7639, 0)} ft²), perimeter ${fmt(per, 0)} m.`;
+  $("exc-info").textContent = lenUnit() === "ft"
+    ? `Area ${fmt(a * 10.7639, 0)} ft² (${fmt(a / 4046.856, 2)} acres), perimeter ${fmt(per / 0.3048, 0)} ft.`
+    : `Area ${fmt(a, 0)} m² (${fmt(a / 10000, 2)} ha), perimeter ${fmt(per, 0)} m.`;
 }
 function loadGeoJSON(gj) {
   const feats = gj.type === "FeatureCollection" ? gj.features : gj.type === "Feature" ? [gj] : [{ type: "Feature", geometry: gj }];
@@ -262,7 +301,7 @@ function ringWells(n, offset) {
 }
 $("btn-generate").onclick = () => {
   if (!state.excavation) { alertMsg("Draw or load the excavation first."); return; }
-  const n = Math.round(num("in-nwells")), off = num("in-offset");
+  const n = Math.round(num("in-nwells")), off = numL("in-offset");
   if (!(n >= 1) || !(off >= 0)) { alertMsg("Enter a number of wells and an offset of zero or more."); return; }
   clearWells();
   ringWells(n, off).forEach((ll) => addWell(ll, false));
@@ -340,26 +379,26 @@ function run() {
   ];
   const st = p.site;
   if (ring && st) {
-    rows.push(["Highest water in the excavation", `${fmt(st.dbase - hmax, 2)} m below ground`]);
-    if (Number.isFinite(st.gelev)) rows.push(["…as an elevation", fmt(st.gelev - st.dbase + hmax, 2)]);
-    rows.push(["Excavation bottom", `${fmt(st.dexc, 2)} m below ground`]);
-    rows.push(["Water below the bottom", `${fmt(st.dbase - hmax - st.dexc, 2)} m (need ${fmt(st.margin, 2)})`]);
+    rows.push(["Highest water in the excavation", `${fmtL(st.dbase - hmax, 2)} below ground`]);
+    if (Number.isFinite(st.gelev)) rows.push(["…as an elevation", fmt((st.gelev - st.dbase + hmax) / Lf(), 2)]);
+    rows.push(["Excavation bottom", `${fmtL(st.dexc, 2)} below ground`]);
+    rows.push(["Water below the bottom", `${fmtL(st.dbase - hmax - st.dexc, 2)} (need ${fmt(st.margin / Lf(), 2)})`]);
   } else if (ring) {
-    rows.push(["Highest head in the excavation", `${fmt(hmax, 2)} m`]);
-    rows.push(["Target head", `${fmt(p.target, 2)} m`]);
-    rows.push(["Margin (target − highest)", `${fmt(p.target - hmax, 2)} m`]);
+    rows.push(["Highest head in the excavation", fmtL(hmax, 2)]);
+    rows.push(["Target head", fmtL(p.target, 2)]);
+    rows.push(["Margin (target − highest)", fmtL(p.target - hmax, 2)]);
   }
-  rows.push(st ? ["Deepest water, at a well", `${fmt(st.dbase - Math.min(...hw), 2)} m below ground`] : ["Lowest head at a well", `${fmt(Math.min(...hw), 2)} m`]);
+  rows.push(st ? ["Deepest water, at a well", `${fmtL(st.dbase - Math.min(...hw), 2)} below ground`] : ["Lowest head at a well", fmtL(Math.min(...hw), 2)]);
   $("results").innerHTML = rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("");
   if (dryWells.length) {
     setStatus("bad", `${dryWells.length} well${dryWells.length > 1 ? "s" : ""} pumped dry (shown red): the rate is more than the aquifer can deliver there. Add wells or lower Q.`);
   } else if (!ring) {
     setStatus("idle", "Draw or load the excavation to check the design.");
   } else if (hmax <= p.target) {
-    setStatus("ok", st ? `Dewatered: the water is at least ${fmt(st.dbase - hmax - st.dexc, 2)} m below the excavation bottom everywhere inside it.`
+    setStatus("ok", st ? `Dewatered: the water is at least ${fmtL(st.dbase - hmax - st.dexc, 2)} below the excavation bottom everywhere inside it.`
       : `Dewatered: the water is at or below the target head everywhere in the excavation.`);
   } else {
-    setStatus("warn", `Not dewatered: the water is ${fmt(hmax - p.target, 2)} m above the required level at the marked point.`);
+    setStatus("warn", `Not dewatered: the water is ${fmtL(hmax - p.target, 2)} above the required level at the marked point.`);
   }
 }
 
@@ -380,14 +419,14 @@ function fieldValues(last) {
   if (!st && (kind === "wdepth" || kind === "elev")) kind = "h";
   if (kind === "elev" && !Number.isFinite(st.gelev)) kind = "wdepth";
   const f = {
-    wdepth: [(x) => st.dbase - x, "Depth to water (m)", st && st.dexc + st.margin, true],
-    elev: [(x) => st.gelev - st.dbase + x, "Water elevation (m)", st && st.gelev - st.dexc - st.margin, false],
-    s: [(x) => p.H - x, "Drawdown (m)", p.H - p.target, true],
-    depth: [(x) => p.target - x, "Water below the required level (m)", 0, true],
-    h: [(x) => x, "Head above the low-k layer, h (m)", p.target, false],
+    wdepth: [(x) => st.dbase - x, "Depth to water", st && st.dexc + st.margin, true],
+    elev: [(x) => st.gelev - st.dbase + x, "Water elevation", st && st.gelev - st.dexc - st.margin, false],
+    s: [(x) => p.H - x, "Drawdown", p.H - p.target, true],
+    depth: [(x) => p.target - x, "Water below the required level", 0, true],
+    h: [(x) => x, "Head above the low-k layer, h", p.target, false],
   }[kind];
-  const v = Float64Array.from(h, f[0]);
-  return { v, title: f[1], kind, tgt: f[2], drier: f[3] };
+  const L = Lf(), v = Float64Array.from(h, (x) => f[0](x) / L);       // in display lengths
+  return { v, title: `${f[1]} (${Ln()})`, kind, tgt: f[2] / L, drier: f[3] };
 }
 
 function niceLevels(lo, hi) {
@@ -476,7 +515,7 @@ function drawResults() {
   // the highest point in the excavation
   if (last.at && last.hmax > p.target) {
     L.circleMarker(toLL(last.at), { radius: 7, color: "#b3261e", weight: 3, fill: false, highPoint: true })
-      .bindTooltip(p.site ? `Highest water in the excavation: ${fmt(p.site.dbase - last.hmax, 2)} m below ground` : `Highest water in the excavation: h = ${fmt(last.hmax, 2)} m`).addTo(marks);
+      .bindTooltip(p.site ? `Highest water in the excavation: ${fmtL(p.site.dbase - last.hmax, 2)} below ground` : `Highest water in the excavation: h = ${fmtL(last.hmax, 2)}`).addTo(marks);
   }
 
   // legend
@@ -513,10 +552,10 @@ $("btn-terrain").onclick = async () => {
   try {
     const z = await elevations(sample);
     const mean = z.reduce((a, b) => a + b, 0) / z.length, lo = Math.min(...z), hi = Math.max(...z);
-    $("in-gelev").value = mean.toFixed(1);
+    $("in-gelev").value = (mean / Lf()).toFixed(1);
     state.terrain = true;
     updateDerived();
-    tip(`Ground over the excavation: ${fmt(lo, 1)} to ${fmt(hi, 1)} m, average ${fmt(mean, 1)} m.`, 5000);
+    tip(`Ground over the excavation: ${fmt(lo / Lf(), 1)} to ${fmtL(hi, 1)}, average ${fmtL(mean, 1)}.`, 5000);
     schedule();
   } catch (e) {
     tip("Terrain data is unavailable right now. Enter the ground elevation by hand.", 4000);
@@ -618,6 +657,9 @@ function drawSection() {
   const zBot = terr ? Math.min(0, ...terr.z) : 0;
   const y = d3.scaleLinear().domain([zBot, zTop]).range([Ht - m.b, m.t]);
   const lev = (z) => (st ? (Number.isFinite(st.gelev) ? st.gelev - st.dbase + z : st.dbase - z) : z);
+  const unlev = (v) => (st ? (Number.isFinite(st.gelev) ? v - (st.gelev - st.dbase) : st.dbase - v) : v);
+  // round ticks in the display unit, placed on the SI scales
+  const ticksIn = (a0, a1, n) => d3.ticks(Math.min(a0, a1), Math.max(a0, a1), n);
   const svg = d3.select(el).append("svg").attr("class", "chart").attr("width", Wd).attr("height", Ht);
   // saturated soil under the water level
   if (st) svg.append("rect").attr("x", m.l).attr("width", Wd - m.l - m.r).attr("y", y(st.dbase)).attr("height", y(0) - y(st.dbase)).attr("fill", "#f1e6cc");
@@ -635,8 +677,8 @@ function drawSection() {
       svg.append("text").attr("x", (x(d0) + x(d1)) / 2).attr("y", y(p.H * 1.04)).attr("text-anchor", "middle").attr("fill", "#b5441f").text("Excavation");
     }
   });
-  svg.append("g").attr("transform", `translate(0,${Ht - m.b})`).call(d3.axisBottom(x).ticks(10));
-  svg.append("g").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(5).tickFormat((z) => fmt(lev(z), 0)));
+  svg.append("g").attr("transform", `translate(0,${Ht - m.b})`).call(d3.axisBottom(x).tickValues(ticksIn(0, len / Lf(), 10).map((t) => t * Lf())).tickFormat((d) => fmt(d / Lf(), 0)));
+  svg.append("g").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).tickValues(ticksIn(lev(zBot) / Lf(), lev(zTop) / Lf(), 6).map((t) => unlev(t * Lf()))).tickFormat((z) => fmt(lev(z) / Lf(), 0)));
   // labels at the right end, above the line (below it with below = true)
   const hline = (v, col, dash, label, below) => {
     svg.append("line").attr("x1", m.l).attr("x2", Wd - m.r).attr("y1", y(v)).attr("y2", y(v)).attr("stroke", col).attr("stroke-width", 1.5).attr("stroke-dasharray", dash);
@@ -644,11 +686,11 @@ function drawSection() {
   };
   if (st) {
     hline(st.dbase, "#8a6d3b", "", terr ? "Ground as modeled (level)" : "Ground");
-    hline(p.H, "#5b6875", "6,4", `Water table before pumping, ${fmt(st.dwt, 1)} m deep`, !!terr);
-    hline(p.target, "#E8582C", "6,4", `Required level, ${fmt(st.dexc + st.margin, 1)} m deep`);
+    hline(p.H, "#5b6875", "6,4", `Water table before pumping, ${fmtL(st.dwt, 1)} deep`, !!terr);
+    hline(p.target, "#E8582C", "6,4", `Required level, ${fmtL(st.dexc + st.margin, 1)} deep`);
   } else {
-    hline(p.H, "#5b6875", "6,4", `Static level, H = ${fmt(p.H, 1)} m`);
-    hline(p.target, "#E8582C", "6,4", `Target, ${fmt(p.target, 1)} m`);
+    hline(p.H, "#5b6875", "6,4", `Static level, H = ${fmtL(p.H, 1)}`);
+    hline(p.target, "#E8582C", "6,4", `Target, ${fmtL(p.target, 1)}`);
   }
   svg.append("line").attr("x1", m.l).attr("x2", Wd - m.r).attr("y1", y(0)).attr("y2", y(0)).attr("stroke", "#1d2733").attr("stroke-width", 3);
   svg.append("path").datum(prof).attr("fill", "none").attr("stroke", "#1F4E79").attr("stroke-width", 2.5)
@@ -659,8 +701,8 @@ function drawSection() {
   });
   svg.append("text").attr("class", "axis-title").attr("x", m.l + 4).attr("y", Ht - 4).text("A");
   svg.append("text").attr("class", "axis-title").attr("x", Wd - m.r - 4).attr("y", Ht - 4).attr("text-anchor", "end").text("A′");
-  svg.append("text").attr("class", "axis-title").attr("x", (m.l + Wd - m.r) / 2).attr("y", Ht - 4).attr("text-anchor", "middle").text("Distance along the section (m)");
-  svg.append("text").attr("class", "axis-title").attr("transform", `translate(14,${(m.t + Ht - m.b) / 2}) rotate(-90)`).attr("text-anchor", "middle").text(st ? (Number.isFinite(st.gelev) ? "Elevation (m)" : "Depth below ground (m)") : "Head, h (m)");
+  svg.append("text").attr("class", "axis-title").attr("x", (m.l + Wd - m.r) / 2).attr("y", Ht - 4).attr("text-anchor", "middle").text(`Distance along the section (${Ln()})`);
+  svg.append("text").attr("class", "axis-title").attr("transform", `translate(14,${(m.t + Ht - m.b) / 2}) rotate(-90)`).attr("text-anchor", "middle").text(`${st ? (Number.isFinite(st.gelev) ? "Elevation" : "Depth below ground") : "Head, h"} (${Ln()})`);
   // the actual ground along the line, from the terrain tiles (read in drawSection's first lines)
   if (terr) {
     svg.append("path").datum(terr.d.map((d, i) => [d, terr.z[i]])).attr("fill", "none").attr("stroke", "#5c4a1f").attr("stroke-width", 2)
@@ -675,9 +717,9 @@ function drawSection() {
     const top = inEx.reduce((u, v) => (v.h > u.h ? v : u));
     svg.append("circle").attr("cx", x(top.d)).attr("cy", y(top.h)).attr("r", 4.5).attr("fill", top.h > p.target ? "#b3261e" : "#1e7a46");
     svg.append("text").attr("x", x(top.d)).attr("y", y(top.h) - 9).attr("text-anchor", "middle").attr("fill", "#1d2733")
-      .text(st ? `${fmt(st.dbase - top.h, 2)} m deep` : `h = ${fmt(top.h, 2)} m`);
+      .text(st ? `${fmtL(st.dbase - top.h, 2)} deep` : `h = ${fmtL(top.h, 2)}`);
   }
-  $("section-title").textContent = `Cross section A–A′ (${fmt(len, 0)} m)${near.length ? ` · ${near.length} well${near.length > 1 ? "s" : ""} on the line` : ""}`;
+  $("section-title").textContent = `Cross section A–A′ (${fmtL(len, 0)})${near.length ? ` · ${near.length} well${near.length > 1 ? "s" : ""} on the line` : ""}`;
 }
 window.addEventListener("resize", () => drawSection());
 
@@ -690,7 +732,7 @@ $("btn-optimize").onclick = () => {
   const r = ring.map(toXY), wells = state.wells.map((w) => toXY(w.marker.getLatLng()));
   const opt = optimalRate(checkPoints(r), wells, p, p.target);
   if (!opt || !isFinite(opt.Q)) return setStatus("bad", "No pumping rate works with these wells.");
-  $("in-Q").value = +(opt.Q / parseFloat($("in-Q-unit").value)).toPrecision(5);
+  $("in-Q").value = trim(opt.Q / Qf());
   run();
   if (opt.feasible) setStatus("ok", `Least Q found: ${fmtQ(opt.Q)}. The highest water in the excavation is exactly at the required level.`);
   if (!opt.feasible) setStatus("bad", "The least rate that dewaters the excavation would pump a well dry. Add wells, or move them farther out.");
@@ -702,7 +744,7 @@ $("btn-curve").onclick = () => {
   const p = params(), err = checkParams({ ...p, Q: 0 });
   if (err) return setStatus("bad", err);
   if (!state.excavation) return setStatus("idle", "The design curve needs an excavation.");
-  const n0 = Math.max(1, Math.round(num("in-nmin"))), n1 = Math.round(num("in-nmax")), off = num("in-offset");
+  const n0 = Math.max(1, Math.round(num("in-nmin"))), n1 = Math.round(num("in-nmax")), off = numL("in-offset");
   if (!(n1 > n0)) return alertMsg("Enter a range of numbers of wells, smallest first.");
   const cp = checkPoints(excRing().map(toXY));
   curveRows = [];
@@ -715,7 +757,7 @@ $("btn-curve").onclick = () => {
   $("dlg-curve").showModal();
 };
 function drawCurve() {
-  const uq = parseFloat($("in-Q-unit").value), unit = $("in-Q-unit").selectedOptions[0].textContent;
+  const uq = Qf(), unit = Qn();
   const el = $("curve-chart");
   el.innerHTML = "";
   const W = Math.min(720, window.innerWidth * 0.9), H = 360, m = { l: 70, r: 20, t: 14, b: 46 };
@@ -736,12 +778,13 @@ function drawCurve() {
   svg.append("text").attr("class", "axis-title").attr("x", (m.l + W - m.r) / 2).attr("y", H - 8).attr("text-anchor", "middle").text("Number of wells, n");
   svg.append("text").attr("class", "axis-title").attr("transform", `translate(16,${(m.t + H - m.b) / 2}) rotate(-90)`).attr("text-anchor", "middle").text(`Least total Q (${unit})`);
   const bad = curveRows.filter((r) => !r.feasible).map((r) => r.n);
-  $("curve-note").textContent = `Rings at ${num("in-offset")} m from the edge, equal rates.`
+  $("curve-note").textContent = `Rings at ${$("in-offset").value} ${Ln()} from the edge, equal rates.`
     + (bad.length ? ` Red points: the least rate would pump a well dry (n = ${bad.join(", ")}).` : "");
 }
 $("btn-curve-csv").onclick = () => {
-  const csv = "wells,total_Q_m3s,total_Q_gpm,q_per_well_m3s,feasible\n"
-    + curveRows.map((r) => `${r.n},${r.Q},${r.Q * GPM_PER_M3S},${r.qEach},${r.feasible}`).join("\n");
+  const u = Qn().replace("³", "3").replace("/", "_per_");
+  const csv = `wells,total_Q_${u},q_per_well_${u},feasible\n`
+    + curveRows.map((r) => `${r.n},${trim(r.Q / Qf())},${trim(r.qEach / Qf())},${r.feasible}`).join("\n");
   download("design_curve.csv", csv, "text/csv");
 };
 
@@ -749,9 +792,10 @@ $("btn-curve-csv").onclick = () => {
 $("btn-export-wells").onclick = () => {
   if (!state.last) return;
   const { wells, qEach, hw } = state.last;
-  const csv = "well,lat,lng,x_m,y_m,q_m3s,q_gpm,head_at_well_m\n" + wells.map((w, i) => {
+  const L = Lf(), u = Qn().replace("³", "3").replace("/", "_per_");
+  const csv = `well,lat,lng,x_${Ln()},y_${Ln()},q_${u},head_at_well_${Ln()}\n` + wells.map((w, i) => {
     const ll = state.wells[i].marker.getLatLng();
-    return `${i + 1},${ll.lat.toFixed(7)},${ll.lng.toFixed(7)},${w.x.toFixed(2)},${w.y.toFixed(2)},${qEach},${qEach * GPM_PER_M3S},${hw[i].toFixed(3)}`;
+    return `${i + 1},${ll.lat.toFixed(7)},${ll.lng.toFixed(7)},${(w.x / L).toFixed(2)},${(w.y / L).toFixed(2)},${trim(qEach / Qf())},${(hw[i] / L).toFixed(3)}`;
   }).join("\n");
   download("wells.csv", csv, "text/csv");
 };
@@ -771,13 +815,20 @@ function project() {
     wells: state.wells.map((w) => { const ll = w.marker.getLatLng(); return [ll.lat, ll.lng]; }),
     inputs: Object.fromEntries(INPUTS.map((id) => [id, $(id).value])),
     mode: mode(),
+    lenUnit: lenUnit(),
     view: { center: map.getCenter(), zoom: map.getZoom() },
     section: state.section ? state.section.map((q) => [q.lat, q.lng]) : null,
   };
 }
 function restore(pr, fit = true) {
   if (!pr || pr.app !== "dewater") { alertMsg("That isn't a Dewater project file."); return; }
-  Object.entries(pr.inputs || {}).forEach(([id, v]) => { if ($(id)) $(id).value = v; });
+  // units first, without converting: the saved values are in the saved units
+  const lu = document.querySelector(`input[name="lenunit"][value="${pr.lenUnit || "m"}"]`);
+  if (lu) { lu.checked = true; lastLen = lu.value; setLenLabels(); }
+  // projects saved before the unit keys: k and Q units were stored as factors
+  const legacy = { "in-k-unit": { "0.01": "cms", "1": "ms", "1.1574074074074074e-5": "mday", "3.5277777777777777e-6": "ftday" }, "in-Q-unit": { "1": "m3s", "0.001": "lps", "6.30902e-5": "gpm" } };
+  Object.entries(pr.inputs || {}).forEach(([id, v]) => { if ($(id)) $(id).value = (legacy[id] && legacy[id][v]) || v; });
+  ["in-k-unit", "in-Q-unit"].forEach((id) => ($(id).dataset.prev = $(id).value));
   const r = document.querySelector(`input[name="mode"][value="${pr.mode || "head"}"]`);
   if (r) { r.checked = true; r.dispatchEvent(new Event("change")); }
   if (state.excavation) { map.removeLayer(state.excavation); state.excavation = null; }
@@ -828,7 +879,7 @@ function fmt(v, d) {
   return v.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
 }
 function fmtNum(v) { return Number.isFinite(v) ? +v.toPrecision(4) : "—"; }
-function fmtQ(q) { return `${fmtNum(q)} m³/s (${fmtNum(q * GPM_PER_M3S)} gpm)`; }
+function fmtQ(q) { return `${fmtNum(q / Qf())} ${Qn()}`; }
 function download(name, text, type) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([text], { type }));

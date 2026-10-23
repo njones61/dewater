@@ -128,3 +128,6 @@ details.sub .fields { margin: 8px 0; }
 
 [hidden] { display: none !important; }
 .terrain-btn button { width: 100%; justify-content: center; }
+.units-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 0 2px; font-size: 13px; color: var(--muted); }
+.seg.small { margin: 0; flex: 0 0 180px; }
+.seg.small label { padding: 4px 6px; }
