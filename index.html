@@ -8,7 +8,7 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%231F4E79'/%3E%3Cpath d='M4 13 Q16 30 28 13' fill='none' stroke='%23E8582C' stroke-width='3'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.css">
-  <link rel="stylesheet" href="css/style.css?v=11">
+  <link rel="stylesheet" href="css/style.css?v=13">
 </head>
 <body>
   <header class="topbar">
@@ -40,13 +40,13 @@
       <section class="step" id="step-exc">
         <h2><span class="num">1</span>Excavation</h2>
         <p class="hint">Draw the excavation outline on the map, or load a GeoJSON polygon.</p>
-        <div class="row">
+        <div class="btn-grid">
           <button id="btn-draw" class="primary">Draw outline</button>
           <button id="btn-rect" class="primary">Draw rectangle</button>
+          <label class="file-btn">Load GeoJSON<input id="file-geojson" type="file" accept=".geojson,.json" hidden></label>
           <button id="btn-edit">Edit</button>
           <button id="btn-rotate">Rotate</button>
           <button id="btn-delete-exc">Delete</button>
-          <label class="file-btn">Load GeoJSON<input id="file-geojson" type="file" accept=".geojson,.json" hidden></label>
         </div>
         <div class="row">
           <button id="btn-example" class="link">Load the class example (BYU)</button>
@@ -66,9 +66,9 @@
           <label><span>Depth to the water table (<span class="uL">m</span>)</span><input id="in-dwt" type="number" step="any" value="5"></label>
           <label><span>Depth to the bottom of the aquifer (<span class="uL">m</span>)</span><input id="in-dbase" type="number" step="any" value="55"></label>
           <label><span>Excavation depth (<span class="uL">m</span>)</span><input id="in-dexc" type="number" step="any" value="20"></label>
-          <label><span>Water required below the bottom (<span class="uL">m</span>)</span><input id="in-margin" type="number" step="any" value="0"></label>
-          <label><span>Ground elevation (<span class="uL">m</span>, optional)</span><input id="in-gelev" type="number" step="any" placeholder="blank = depths only"></label>
-          <label class="terrain-btn"><span>&nbsp;</span><button id="btn-terrain" type="button">Get from terrain</button></label>
+          <label><span>Extra depth below the bottom (<span class="uL">m</span>)</span><input id="in-margin" type="number" step="any" value="0"></label>
+          <label class="span2"><span>Ground elevation (<span class="uL">m</span>), optional</span>
+            <span class="pair"><input id="in-gelev" type="number" step="any" placeholder="blank = depths only"><button id="btn-terrain" type="button">Get from terrain</button></span></label>
         </div>
         <div class="fields two" id="head-fields" hidden>
           <label><span>Initial saturated thickness, H (<span class="uL">m</span>)</span><input id="in-H" type="number" step="any" value="50"></label>
@@ -90,7 +90,7 @@
       <!-- 3. Wells -->
       <section class="step" id="step-wells">
         <h2><span class="num">3</span>Wells</h2>
-        <div class="row">
+        <div class="row even">
           <button id="btn-add-wells" class="toggle">Click to add wells</button>
           <button id="btn-clear-wells">Clear wells</button>
         </div>
@@ -136,7 +136,7 @@
               <option value="Spectral">Spectral</option><option value="RdYlBu">Red–yellow–blue</option>
               <option value="Blues">Blues</option><option value="Greys">Grays</option>
             </select></label>
-          <label class="check" style="align-self:end"><input id="in-ramp-rev" type="checkbox"> Reverse</label>
+          <label class="check ramp-rev"><input id="in-ramp-rev" type="checkbox"> Reverse</label>
         </div>
         <label class="check"><input id="in-fill" type="checkbox" checked> Color fill</label>
         <label class="check"><input id="in-dewatered" type="checkbox" checked> Shade where the water is below the required level</label>
@@ -148,7 +148,7 @@
         <h2><span class="num">6</span>Cross section</h2>
         <p class="hint">A profile of the water level along a line: east–west or north–south through
           the middle of the excavation, or any line you draw.</p>
-        <div class="row">
+        <div class="row even">
           <button id="btn-sec-ew">East–west</button>
           <button id="btn-sec-ns">North–south</button>
           <button id="btn-sec-draw">Draw a line</button>
@@ -170,7 +170,7 @@
 
       <section class="step exports">
         <h2>Export</h2>
-        <div class="row">
+        <div class="row even">
           <button id="btn-export-wells">Wells (CSV)</button>
           <button id="btn-export-contours">Contours (GeoJSON)</button>
         </div>
@@ -257,6 +257,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-  <script type="module" src="js/app.js?v=11"></script>
+  <script type="module" src="js/app.js?v=13"></script>
 </body>
 </html>

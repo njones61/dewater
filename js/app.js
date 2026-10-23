@@ -702,7 +702,8 @@ function drawSection() {
       const zb = st.dbase - st.dexc;
       svg.append("rect").attr("x", x(d0)).attr("width", Math.max(1, x(d1) - x(d0))).attr("y", y(st.dbase)).attr("height", y(zb) - y(st.dbase))
         .attr("fill", "#ffffff").attr("stroke", "#8a6d3b").attr("stroke-width", 1.5);
-      svg.append("text").attr("x", (x(d0) + x(d1)) / 2).attr("y", (y(st.dbase) + y(zb)) / 2 + 4).attr("text-anchor", "middle").attr("fill", "#8a6d3b").text("Excavation");
+      svg.append("text").attr("x", (x(d0) + x(d1)) / 2).attr("y", y(st.dbase) + 15).attr("text-anchor", "middle").attr("fill", "#8a6d3b")
+        .attr("paint-order", "stroke").attr("stroke", "#fff").attr("stroke-width", 4).text("Excavation");
     } else {
       svg.append("rect").attr("x", x(d0)).attr("width", Math.max(1, x(d1) - x(d0))).attr("y", y(zTop)).attr("height", y(0) - y(zTop))
         .attr("fill", "rgba(232,88,44,.10)").attr("stroke", "#E8582C").attr("stroke-dasharray", "4,3");
@@ -748,7 +749,10 @@ function drawSection() {
   if (inEx.length) {
     const top = inEx.reduce((u, v) => (v.h > u.h ? v : u));
     svg.append("circle").attr("cx", x(top.d)).attr("cy", y(top.h)).attr("r", 4.5).attr("fill", top.h > p.target ? "#b3261e" : "#1e7a46");
-    svg.append("text").attr("x", x(top.d)).attr("y", y(top.h) - 9).attr("text-anchor", "middle").attr("fill", "#1d2733")
+    // to the right of the point, on a white backing so it reads over any line
+    const right = x(top.d) < (m.l + Wd - m.r) / 2;
+    svg.append("text").attr("x", x(top.d) + (right ? 9 : -9)).attr("y", y(top.h) - 7).attr("text-anchor", right ? "start" : "end").attr("fill", "#1d2733")
+      .attr("paint-order", "stroke").attr("stroke", "#fff").attr("stroke-width", 4).attr("stroke-linejoin", "round")
       .text(st ? `${fmtL(st.dbase - top.h, 2)} deep` : `h = ${fmtL(top.h, 2)}`);
   }
   $("section-title").textContent = `Cross section A–A′ (${fmtL(len, 0)})${near.length ? ` · ${near.length} well${near.length > 1 ? "s" : ""} on the line` : ""}`;
