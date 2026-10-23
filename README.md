@@ -15,6 +15,10 @@ Design a dewatering well system for an excavation in an unconfined aquifer, in t
 6. Compute the design curve, the least total rate against the number of wells, to choose how many
    wells to use.
 
+The ground elevation can be read from open terrain data (AWS Terrain Tiles; USGS 3DEP in the
+US), averaged over the excavation, and the cross section then shows the actual ground profile.
+The calculation still treats the ground and the initial water table as level.
+
 Projects save to a small JSON file (the outline, the wells, and the inputs) and open again later.
 Wells export as CSV, contours as GeoJSON.
 
