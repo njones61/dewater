@@ -8,7 +8,7 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%231F4E79'/%3E%3Cpath d='M4 13 Q16 30 28 13' fill='none' stroke='%23E8582C' stroke-width='3'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.css">
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/style.css?v=6">
 </head>
 <body>
   <header class="topbar">
@@ -53,7 +53,7 @@
         <h2><span class="num">2</span>Site and aquifer</h2>
         <div class="seg" role="radiogroup" aria-label="How to enter the levels">
           <label><input type="radio" name="mode" value="depth" checked> Depths below ground</label>
-          <label><input type="radio" name="mode" value="head"> Heads above the low-k layer</label>
+          <label><input type="radio" name="mode" value="head"> Heads above low-k layer</label>
         </div>
         <div class="fields two" id="depth-fields">
           <label>Depth to the water table (m)<input id="in-dwt" type="number" step="any" value="5"></label>
@@ -119,6 +119,16 @@
           <label>Contour
             <select id="in-field"><option value="wdepth">Depth to water</option><option value="elev">Water elevation</option><option value="s">Drawdown</option><option value="depth">Water below the required level</option><option value="h">Head above the low-k layer, h</option></select></label>
           <label>Interval (m, blank = auto)<input id="in-interval" type="number" step="any" placeholder="auto"></label>
+        </div>
+        <div class="fields two">
+          <label>Color ramp
+            <select id="in-ramp">
+              <option value="YlGnBu" selected>Yellow–blue</option><option value="Viridis">Viridis</option>
+              <option value="Cividis">Cividis</option><option value="Turbo">Turbo</option>
+              <option value="Spectral">Spectral</option><option value="RdYlBu">Red–yellow–blue</option>
+              <option value="Blues">Blues</option><option value="Greys">Grays</option>
+            </select></label>
+          <label class="check" style="align-self:end"><input id="in-ramp-rev" type="checkbox"> Reverse</label>
         </div>
         <label class="check"><input id="in-fill" type="checkbox" checked> Color fill</label>
         <label class="check"><input id="in-dewatered" type="checkbox" checked> Shade where the water is below the required level</label>
@@ -230,6 +240,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-  <script type="module" src="js/app.js"></script>
+  <script type="module" src="js/app.js?v=6"></script>
 </body>
 </html>

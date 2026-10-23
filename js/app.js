@@ -410,7 +410,10 @@ function drawResults() {
   // the required level always gets its own contour
   const levels = [...new Set([...niceLevels(lo, hi), ...(tgt > lo && tgt < hi ? [tgt] : [])])].sort((a, b) => a - b);
   // low head (deep drawdown) dark
-  const color = d3.scaleSequential(d3.interpolateYlGnBu).domain(drier ? [lo, hi] : [hi, lo]);
+  // drier (deeper water) at the dark end of the ramp; Reverse flips it
+  const ramp = d3[`interpolate${$("in-ramp").value}`] || d3.interpolateYlGnBu;
+  const flip = $("in-ramp-rev").checked !== ["Spectral", "RdYlBu"].includes($("in-ramp").value);
+  const color = d3.scaleSequential(ramp).domain((drier !== flip) ? [lo, hi] : [hi, lo]);
   const op = parseFloat($("in-opacity").value);
 
   // color fill: a raster over the analysis box
@@ -485,7 +488,7 @@ function drawResults() {
 }
 const levelDigits = (lv) => (lv.length > 1 && lv[1] - lv[0] < 1 ? 1 : 0);
 
-["in-field", "in-interval", "in-fill", "in-dewatered"].forEach((id) => $(id).addEventListener("change", () => { drawResults(); persist(); }));
+["in-field", "in-interval", "in-fill", "in-dewatered", "in-ramp", "in-ramp-rev"].forEach((id) => $(id).addEventListener("change", () => { drawResults(); persist(); }));
 $("in-opacity").addEventListener("input", () => fill.setOpacity(parseFloat($("in-opacity").value)));
 ["in-k", "in-k-unit", "in-H", "in-R", "in-target", "in-rw", "in-Q", "in-Q-unit", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev"]
   .forEach((id) => $(id).addEventListener("input", () => { updateDerived(); schedule(250); }));
@@ -705,7 +708,7 @@ $("btn-export-contours").onclick = () => {
   download("contours.geojson", JSON.stringify(fc), "application/geo+json");
 };
 
-const INPUTS = ["in-k", "in-k-unit", "in-H", "in-R", "in-target", "in-rw", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-Q", "in-Q-unit", "in-offset", "in-nwells", "in-field", "in-interval", "in-nmin", "in-nmax"];
+const INPUTS = ["in-k", "in-k-unit", "in-H", "in-R", "in-target", "in-rw", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-Q", "in-Q-unit", "in-offset", "in-nwells", "in-field", "in-interval", "in-nmin", "in-nmax", "in-ramp"];
 function project() {
   const f = excFeature();
   return {
