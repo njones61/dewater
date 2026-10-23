@@ -2,7 +2,7 @@
 
 Design a dewatering well system for an excavation in an unconfined aquifer, in the browser.
 
-**Use it:** https://njones61.github.io/dewater/
+**Use it:** https://jonesgeo.com/dewater/
 
 1. Find the site and draw the excavation outline on the map, or load a GeoJSON polygon.
 2. Enter the aquifer properties (k, H, R) and the target head inside the excavation.
