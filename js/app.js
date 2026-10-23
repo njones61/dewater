@@ -181,9 +181,10 @@ function setExcavation(layer, fit = true) {
   if (state.excavation && state.excavation !== layer) map.removeLayer(state.excavation);
   state.excavation = layer;
   layer.setStyle(EXC_STYLE);
-  layer.on("pm:edit pm:dragend pm:rotateend", () => { updateExcInfo(); schedule(); });
+  layer.on("pm:edit pm:dragend pm:rotateend", () => { updateExcInfo(); refreshTerrain(); schedule(); });
   layer.on("pm:remove", () => { state.excavation = null; updateExcInfo(); schedule(); });
   setOrigin(layer.getBounds().getCenter());
+  refreshTerrain();
   if (fit) map.fitBounds(layer.getBounds().pad(1.2));
   updateExcInfo();
   schedule();
@@ -566,11 +567,14 @@ $("in-opacity").addEventListener("input", () => fill.setOpacity(parseFloat($("in
 // ------------------------------------------------------------------ terrain
 // The ground elevation from open terrain tiles: the average over the excavation (points on a
 // grid inside it), or around the wells if there is no excavation yet.
-state.terrain = false;        // the section draws the terrain profile once the user asks for it
-$("btn-terrain").onclick = async () => {
+// "Use terrain" on: the ground elevation comes from the terrain (read-only), and the cross section
+// draws the actual ground. Off: the ground elevation is typed in (or left blank), and the
+// section shows level ground. The calculation treats the ground as level either way.
+state.terrain = false;
+async function readTerrain() {
   const ring = excRing();
   const pts = ring || state.wells.map((w) => w.marker.getLatLng());
-  if (!pts.length) return alertMsg("Draw the excavation first.");
+  if (!pts.length) { alertMsg("Draw the excavation first."); return false; }
   if (!state.origin) setOrigin(L.latLngBounds(pts).getCenter());
   let sample;
   if (ring) {
@@ -578,20 +582,29 @@ $("btn-terrain").onclick = async () => {
     sample = grid([Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)], 15, 15).filter((q) => inside(q, r)).map(toLL);
     if (!sample.length) sample = ring;
   } else sample = pts;
-  $("btn-terrain").disabled = true; $("btn-terrain").textContent = "Reading terrain…";
   try {
     const z = await elevations(sample);
     const mean = z.reduce((a, b) => a + b, 0) / z.length, lo = Math.min(...z), hi = Math.max(...z);
     $("in-gelev").value = (mean / Lf()).toFixed(1);
-    state.terrain = true;
-    updateDerived();
     tip(`Ground over the excavation: ${fmt(lo / Lf(), 1)} to ${fmtL(hi, 1)}, average ${fmtL(mean, 1)}.`, 5000);
-    schedule();
+    return true;
   } catch (e) {
     tip("Terrain data is unavailable right now. Enter the ground elevation by hand.", 4000);
-  } finally { $("btn-terrain").disabled = false; $("btn-terrain").textContent = "Get from terrain"; }
-};
-$("in-gelev").addEventListener("input", () => { if (!$("in-gelev").value) state.terrain = false; });
+    return false;
+  }
+}
+async function setTerrain(on) {
+  $("in-terrain").checked = on;
+  if (on && !(await readTerrain())) on = false;
+  $("in-terrain").checked = on;
+  state.terrain = on;
+  $("in-gelev").readOnly = on;
+  updateDerived();
+  schedule();
+}
+$("in-terrain").addEventListener("change", () => setTerrain($("in-terrain").checked));
+// with terrain on, a new or reshaped excavation re-reads the ground under it
+function refreshTerrain() { if (state.terrain) readTerrain().then(() => { updateDerived(); schedule(); }); }
 
 // ------------------------------------------------------------------ cross section
 const secLayer = L.layerGroup().addTo(map);
@@ -657,6 +670,7 @@ function drawSection() {
   const pts = d3.range(N + 1).map((i) => ({ x: a.x + ux * len * i / N, y: a.y + uy * len * i / N }));
   const { h } = heads(pts, W, p);
   const prof = pts.map((q, i) => ({ d: len * i / N, h: h[i], inExc: ring ? inside(q, ring) : false }));
+  state.secData = { prof, st: p.site };
   // wells within a few percent of the line's length of it, at their place along it
   const near = wells.map((w, i) => ({ i, d: (w.x - a.x) * ux + (w.y - a.y) * uy, off: Math.abs(-(w.x - a.x) * uy + (w.y - a.y) * ux) }))
     .filter((w) => w.d >= 0 && w.d <= len && w.off <= Math.max(0.04 * len, 3 * p.rw));
@@ -694,15 +708,22 @@ function drawSection() {
   const ticksIn = (a0, a1, n) => d3.ticks(Math.min(a0, a1), Math.max(a0, a1), n);
   const svg = d3.select(el).append("svg").attr("class", "chart").attr("width", Wd).attr("height", Ht);
   // saturated soil under the water level
-  if (st) svg.append("rect").attr("x", m.l).attr("width", Wd - m.l - m.r).attr("y", y(st.dbase)).attr("height", y(0) - y(st.dbase)).attr("fill", "#f1e6cc");
+  // soil: from the terrain down when it is shown, otherwise from the level ground
+  const tz = terr ? (d) => { const i = Math.min(terr.d.length - 2, Math.max(0, Math.floor(d / terr.d[terr.d.length - 1] * (terr.d.length - 1))));
+    const f = (d - terr.d[i]) / (terr.d[i + 1] - terr.d[i]); return terr.z[i] + f * (terr.z[i + 1] - terr.z[i]); } : null;
+  if (terr) svg.append("path").datum(terr.d).attr("fill", "#f1e6cc").attr("d", d3.area().x((d) => x(d)).y0(y(0)).y1((d) => y(tz(d))));
+  else if (st) svg.append("rect").attr("x", m.l).attr("width", Wd - m.l - m.r).attr("y", y(st.dbase)).attr("height", y(0) - y(st.dbase)).attr("fill", "#f1e6cc");
   svg.append("path").datum(prof).attr("fill", "#cfe3f1")
     .attr("d", d3.area().x((q) => x(q.d)).y0(y(0)).y1((q) => y(q.h)));
   spans.forEach(([d0, d1]) => {
     if (st) {        // the pit, cut from the ground down to the excavation bottom
       const zb = st.dbase - st.dexc;
-      svg.append("rect").attr("x", x(d0)).attr("width", Math.max(1, x(d1) - x(d0))).attr("y", y(st.dbase)).attr("height", y(zb) - y(st.dbase))
+      const topAt = (d) => (terr ? Math.max(tz(d), zb) : st.dbase);
+      const ds = d3.range(0, 41).map((i) => d0 + (d1 - d0) * i / 40);
+      const pit = [[d0, zb], ...ds.map((d) => [d, topAt(d)]), [d1, zb]];
+      svg.append("path").attr("d", d3.line().x((q) => x(q[0])).y((q) => y(q[1]))(pit) + "Z")
         .attr("fill", "#ffffff").attr("stroke", "#8a6d3b").attr("stroke-width", 1.5);
-      svg.append("text").attr("x", (x(d0) + x(d1)) / 2).attr("y", y(st.dbase) + 15).attr("text-anchor", "middle").attr("fill", "#8a6d3b")
+      svg.append("text").attr("x", (x(d0) + x(d1)) / 2).attr("y", (y(Math.min(...ds.map(topAt))) + y(zb)) / 2 + 4).attr("text-anchor", "middle").attr("fill", "#8a6d3b")
         .attr("paint-order", "stroke").attr("stroke", "#fff").attr("stroke-width", 4).text("Excavation");
     } else {
       svg.append("rect").attr("x", x(d0)).attr("width", Math.max(1, x(d1) - x(d0))).attr("y", y(zTop)).attr("height", y(0) - y(zTop))
@@ -713,12 +734,14 @@ function drawSection() {
   svg.append("g").attr("transform", `translate(0,${Ht - m.b})`).call(d3.axisBottom(x).tickValues(ticksIn(0, len / Lf(), 10).map((t) => t * Lf())).tickFormat((d) => fmt(d / Lf(), 0)));
   svg.append("g").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).tickValues(ticksIn(lev(zBot) / Lf(), lev(zTop) / Lf(), 6).map((t) => unlev(t * Lf()))).tickFormat((z) => fmt(lev(z) / Lf(), 0)));
   // labels at the right end, above the line (below it with below = true)
-  const hline = (v, col, dash, label, below) => {
-    svg.append("line").attr("x1", m.l).attr("x2", Wd - m.r).attr("y1", y(v)).attr("y2", y(v)).attr("stroke", col).attr("stroke-width", 1.5).attr("stroke-dasharray", dash);
-    svg.append("text").attr("x", Wd - m.r - 4).attr("y", y(v) + (below ? 13 : -4)).attr("text-anchor", "end").attr("fill", col).text(label);
+  const hline = (v, col, dash, label, below, width = 1.5) => {
+    svg.append("line").attr("x1", m.l).attr("x2", Wd - m.r).attr("y1", y(v)).attr("y2", y(v)).attr("stroke", col).attr("stroke-width", width).attr("stroke-dasharray", dash);
+    svg.append("text").attr("x", Wd - m.r - 4).attr("y", y(v) + (below ? 13 : -4)).attr("text-anchor", "end").attr("fill", col)
+      .attr("paint-order", "stroke").attr("stroke", "#fff").attr("stroke-width", 4).attr("stroke-linejoin", "round").text(label);
   };
   if (st) {
-    hline(st.dbase, "#8a6d3b", "", terr ? "Ground as modeled (level)" : "Ground");
+    if (terr) hline(st.dbase, "#8a6d3b", "2,3", "", false, 1);       // named in the section's title
+    else hline(st.dbase, "#8a6d3b", "", "Ground");
     hline(p.H, "#5b6875", "6,4", `Water table before pumping, ${fmtL(st.dwt, 1)} deep`, !!terr);
     hline(p.target, "#E8582C", "6,4", `Required level, ${fmtL(st.dexc + st.margin, 1)} deep`);
   } else {
@@ -741,7 +764,8 @@ function drawSection() {
     svg.append("path").datum(terr.d.map((d, i) => [d, terr.z[i]])).attr("fill", "none").attr("stroke", "#5c4a1f").attr("stroke-width", 2)
       .attr("d", d3.line().x((q) => x(q[0])).y((q) => y(q[1])));
     const k = Math.floor(terr.d.length * 0.1);
-    svg.append("text").attr("x", x(terr.d[k])).attr("y", y(terr.z[k]) - 6).attr("fill", "#5c4a1f").text("Ground (terrain)");
+    svg.append("text").attr("x", x(terr.d[k])).attr("y", y(terr.z[k]) - 6).attr("fill", "#5c4a1f")
+      .attr("paint-order", "stroke").attr("stroke", "#fff").attr("stroke-width", 4).text("Ground (terrain)");
   }
 
   // the highest water inside the excavation along this line
@@ -755,7 +779,8 @@ function drawSection() {
       .attr("paint-order", "stroke").attr("stroke", "#fff").attr("stroke-width", 4).attr("stroke-linejoin", "round")
       .text(st ? `${fmtL(st.dbase - top.h, 2)} deep` : `h = ${fmtL(top.h, 2)}`);
   }
-  $("section-title").textContent = `Cross section A–A′ (${fmtL(len, 0)})${near.length ? ` · ${near.length} well${near.length > 1 ? "s" : ""} on the line` : ""}`;
+  $("section-title").textContent = `Cross section A–A′ (${fmtL(len, 0)})${near.length ? ` · ${near.length} well${near.length > 1 ? "s" : ""} on the line` : ""}`
+    + (terr ? " · dotted line: the average ground, which the calculation treats as level" : "");
 }
 window.addEventListener("resize", () => drawSection());
 
@@ -878,6 +903,7 @@ function project() {
     inputs: Object.fromEntries(INPUTS.map((id) => [id, $(id).value])),
     mode: mode(),
     lenUnit: lenUnit(),
+    terrain: state.terrain,
     view: { center: map.getCenter(), zoom: map.getZoom() },
     section: state.section ? state.section.map((q) => [q.lat, q.lng]) : null,
   };
@@ -903,6 +929,7 @@ function restore(pr, fit = true) {
   updateWellsInfo();
   if (!fit && pr.view) map.setView(pr.view.center, pr.view.zoom);
   if (pr.section) setSection(L.latLng(...pr.section[0]), L.latLng(...pr.section[1]));
+  if (pr.terrain) { state.terrain = true; $("in-terrain").checked = true; $("in-gelev").readOnly = true; schedule(); }
   schedule();
 }
 $("btn-save").onclick = () => download("dewater_project.json", JSON.stringify(project(), null, 1), "application/json");
@@ -942,6 +969,39 @@ function fmt(v, d) {
 }
 function fmtNum(v) { return Number.isFinite(v) ? +v.toPrecision(4) : "—"; }
 function fmtQ(q) { return `${fmtNum(q / Qf())} ${Qn()}`; }
+// A chart's SVG as a PNG at twice its size, on white, with the page's chart fonts.
+function svgToPng(svg, name, title) {
+  const w = +svg.getAttribute("width"), h = +svg.getAttribute("height"), pad = title ? 28 : 0, sc = 2;
+  const clone = svg.cloneNode(true);
+  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
+  style.textContent = "text{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;font-size:12px;fill:#5b6875}.axis-title{font-size:12.5px;fill:#1d2733}";
+  clone.insertBefore(style, clone.firstChild);
+  const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(clone)], { type: "image/svg+xml" }));
+  const img = new Image();
+  img.onload = () => {
+    const c = document.createElement("canvas");
+    c.width = w * sc; c.height = (h + pad) * sc;
+    const ctx = c.getContext("2d");
+    ctx.scale(sc, sc);
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h + pad);
+    if (title) { ctx.fillStyle = "#143A5C"; ctx.font = "600 14px system-ui, sans-serif"; ctx.fillText(title, 12, 19); }
+    ctx.drawImage(img, 0, pad, w, h);
+    URL.revokeObjectURL(url);
+    c.toBlob((b) => { const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); });
+  };
+  img.src = url;
+}
+$("btn-curve-png").onclick = () => { const sv = $("curve-chart").querySelector("svg"); if (sv) svgToPng(sv, "design_curve.png", "Least total Q against number of wells"); };
+$("btn-sec-png").onclick = () => { const sv = $("section-chart").querySelector("svg"); if (sv) svgToPng(sv, "cross_section.png", $("section-title").textContent); };
+$("btn-sec-csv").onclick = () => {
+  const c = state.secData;
+  if (!c) return;
+  const L = Lf(), u = Ln();
+  const rows = c.prof.map((q) => [ (q.d / L).toFixed(2), (q.h / L).toFixed(3), c.st ? ((c.st.dbase - q.h) / L).toFixed(3) : "", c.st && Number.isFinite(c.st.gelev) ? ((c.st.gelev - c.st.dbase + q.h) / L).toFixed(3) : "", q.inExc ? 1 : 0 ].join(","));
+  download("cross_section.csv", `distance_${u},head_${u},depth_to_water_${u},water_elevation_${u},in_excavation\n` + rows.join("\n"), "text/csv");
+};
+
 function download(name, text, type) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([text], { type }));

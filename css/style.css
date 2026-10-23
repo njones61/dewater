@@ -147,3 +147,9 @@ details.sub .fields { margin: 8px 0; }
 .btn-grid > *, .row.even > * { padding-left: 4px; padding-right: 4px; white-space: nowrap; }
 .fields input[type=checkbox] { width: auto; }
 #derived { margin: 10px 0; }
+.switch { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; color: var(--ink); cursor: pointer; white-space: nowrap; user-select: none; }
+.switch input { width: auto !important; margin: 0; }
+.switch:has(input:checked) { background: var(--navy); border-color: var(--navy); color: #fff; }
+input[readonly] { background: var(--bg); color: var(--muted); }
+.head-btns { display: flex; gap: 6px; align-items: center; }
+button.small { font-size: 12px; padding: 2px 8px; }
