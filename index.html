@@ -242,6 +242,16 @@
       <p>Points are checked on a grid over the excavation and along its edge, where the water is
         usually highest. A design fails if that Q would pump a well dry (the head at its radius
         drops to zero): add wells or move them out.</p>
+      <h3>The radius of influence in practice</h3>
+      <p>R is the least certain input. When a pumping test is available, R comes from it: plot the
+        drawdowns at the observation wells against the log of distance and extend the line to zero
+        drawdown. Without one, an empirical formula such as Sichardt's gives an estimate, usually
+        computed once from the drawdown the design calls for. The pumping rate depends on R only
+        through ln(R/r), so a common check is to run the design for a range of R. R also grows with
+        pumping time (about 1.5√(Tt/S) by the Cooper–Jacob approximation), so a steady R stands
+        for some period of pumping. Around a compact excavation, a ring of wells behaves much like
+        one large well of radius √(A/π); that is why, for a small site, the least total rate barely
+        changes with the number of wells.</p>
       <h3>Steps</h3>
       <ol>
         <li>Find the site (search, or zoom and pan) and draw the excavation outline, drag a
@@ -274,6 +284,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-  <script type="module" src="js/app.js?v=21"></script>
+  <script type="module" src="js/app.js?v=22"></script>
 </body>
 </html>
