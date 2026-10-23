@@ -1,0 +1,569 @@
+// app.js — the map, the panel, and the drawing of results. The calculation is in model.js.
+import { heads, optimalRate, grid, inside, densify, GPM_PER_M3S } from "./model.js";
+
+/* global L, turf, d3 */
+
+// ------------------------------------------------------------------ map
+const map = L.map("map", { zoomControl: true, preferCanvas: false }).setView([39.5, -98.35], 4);
+const street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 20, maxNativeZoom: 19, attribution: "&copy; OpenStreetMap contributors",
+});
+const imagery = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+  maxZoom: 20, maxNativeZoom: 19, attribution: "Imagery &copy; Esri, Maxar, Earthstar Geographics",
+});
+imagery.addTo(map);
+L.control.layers({ Imagery: imagery, Streets: street }, null, { position: "topright" }).addTo(map);
+L.control.scale({ imperial: true, metric: true, position: "bottomleft" }).addTo(map);
+map.pm.setGlobalOptions({ snappable: true, allowSelfIntersection: false });
+map.pm.setLang("en");
+
+const resultsPane = map.createPane("results");
+resultsPane.style.zIndex = 350;               // above the basemap, below the excavation outline
+resultsPane.style.pointerEvents = "none";
+
+// ------------------------------------------------------------------ state
+const state = {
+  excavation: null,       // L.Polygon
+  wells: [],              // [{ marker }]
+  addMode: false,
+  origin: null,           // [lat, lng] of the local x-y frame
+  last: null,             // last computed results
+};
+const fill = L.imageOverlay("data:image/gif;base64,R0lGODlhAQABAAAAACw=", [[0, 0], [0, 0]], { pane: "results", opacity: 0.55 }).addTo(map);
+const lines = L.layerGroup([], { pane: "results" }).addTo(map);
+const shade = L.layerGroup([], { pane: "results" }).addTo(map);
+const marks = L.layerGroup().addTo(map);
+
+const $ = (id) => document.getElementById(id);
+const num = (id) => parseFloat($(id).value);
+
+// ------------------------------------------------------------------ local frame (meters)
+// An equirectangular frame centered on the site: accurate to a small fraction of a percent over
+// the few kilometers a dewatering design covers.
+const M_LAT = 110574;
+const mLng = (lat) => 111320 * Math.cos(lat * Math.PI / 180);
+function setOrigin(latlng) { state.origin = [latlng.lat, latlng.lng]; }
+function toXY(ll) {
+  const [la0, lo0] = state.origin;
+  return { x: (ll.lng - lo0) * mLng(la0), y: (ll.lat - la0) * M_LAT };
+}
+function toLL(p) {
+  const [la0, lo0] = state.origin;
+  return L.latLng(la0 + p.y / M_LAT, lo0 + p.x / mLng(la0));
+}
+
+// ------------------------------------------------------------------ inputs
+function params() {
+  return {
+    k: num("in-k") * parseFloat($("in-k-unit").value),
+    H: num("in-H"), R: num("in-R"), rw: num("in-rw"),
+    target: num("in-target"),
+    Q: num("in-Q") * parseFloat($("in-Q-unit").value),
+  };
+}
+function checkParams(p) {
+  if (!(p.k > 0)) return "Enter a hydraulic conductivity greater than zero.";
+  if (!(p.H > 0)) return "Enter a saturated thickness H greater than zero.";
+  if (!(p.R > 0)) return "Enter a radius of influence R greater than zero.";
+  if (!(p.rw > 0) || p.rw >= p.R) return "The well radius must be greater than zero and less than R.";
+  if (!(p.target >= 0) || p.target >= p.H) return "The target head must be at least zero and less than H.";
+  if (!(p.Q >= 0)) return "Enter a pumping rate of zero or more.";
+  return null;
+}
+
+// ------------------------------------------------------------------ excavation
+const EXC_STYLE = { color: "#E8582C", weight: 3, fillColor: "#E8582C", fillOpacity: 0.08 };
+
+function setExcavation(layer, fit = true) {
+  if (state.excavation && state.excavation !== layer) map.removeLayer(state.excavation);
+  state.excavation = layer;
+  layer.setStyle(EXC_STYLE);
+  layer.on("pm:edit pm:dragend", () => { updateExcInfo(); schedule(); });
+  layer.on("pm:remove", () => { state.excavation = null; updateExcInfo(); schedule(); });
+  setOrigin(layer.getBounds().getCenter());
+  if (fit) map.fitBounds(layer.getBounds().pad(1.2));
+  updateExcInfo();
+  schedule();
+}
+function excRing() {
+  if (!state.excavation) return null;
+  let ll = state.excavation.getLatLngs();
+  while (Array.isArray(ll[0])) ll = ll[0];
+  return ll;
+}
+function excFeature() {
+  const ring = excRing();
+  if (!ring) return null;
+  const c = ring.map((p) => [p.lng, p.lat]);
+  c.push(c[0]);
+  return turf.polygon([c]);
+}
+function updateExcInfo() {
+  const f = excFeature();
+  if (!f) { $("exc-info").textContent = "No excavation yet."; return; }
+  const a = turf.area(f), per = turf.length(turf.polygonToLine(f), { units: "meters" });
+  $("exc-info").textContent = `Area ${fmt(a, 0)} m² (${fmt(a * 10.7639, 0)} ft²), perimeter ${fmt(per, 0)} m.`;
+}
+function loadGeoJSON(gj) {
+  const feats = gj.type === "FeatureCollection" ? gj.features : gj.type === "Feature" ? [gj] : [{ type: "Feature", geometry: gj }];
+  const poly = feats.find((f) => f.geometry && /Polygon/.test(f.geometry.type));
+  if (!poly) { alertMsg("That file has no polygon in it."); return; }
+  let coords = poly.geometry.type === "MultiPolygon" ? poly.geometry.coordinates[0][0] : poly.geometry.coordinates[0];
+  const layer = L.polygon(coords.slice(0, -1).map(([lng, lat]) => [lat, lng]));
+  layer.addTo(map);
+  setExcavation(layer);
+}
+
+$("btn-draw").onclick = () => {
+  setAddMode(false);
+  map.pm.enableDraw("Polygon", { templineStyle: EXC_STYLE, hintlineStyle: { color: "#E8582C", dashArray: "5,5" }, pathOptions: EXC_STYLE });
+  tip("Click the corners of the excavation. Click the first corner to finish.");
+};
+map.on("pm:create", (e) => {
+  tip(null);
+  if (e.shape === "Polygon") setExcavation(e.layer, false);
+});
+$("btn-edit").onclick = () => {
+  if (!state.excavation) return;
+  const on = state.excavation.pm.enabled();
+  if (on) { state.excavation.pm.disable(); $("btn-edit").textContent = "Edit"; tip(null); }
+  else { state.excavation.pm.enable({ allowSelfIntersection: false }); $("btn-edit").textContent = "Done editing"; tip("Drag the corners to reshape the excavation."); }
+};
+$("file-geojson").onchange = (e) => readFile(e.target.files[0], (t) => loadGeoJSON(JSON.parse(t)));
+$("btn-example").onclick = async () => {
+  const gj = await (await fetch("examples/byu_brewster.geojson")).json();
+  loadGeoJSON(gj);
+};
+$("btn-export-exc").onclick = () => {
+  const f = excFeature();
+  if (f) download("excavation.geojson", JSON.stringify(turf.featureCollection([f])), "application/geo+json");
+};
+
+// ------------------------------------------------------------------ wells
+const wellIcon = (dry) => L.divIcon({ className: "", html: `<div class="well-icon${dry ? " dry" : ""}"></div>`, iconSize: [14, 14], iconAnchor: [7, 7] });
+
+function addWell(latlng, run = true) {
+  if (!state.origin) setOrigin(latlng);
+  const marker = L.marker(latlng, { icon: wellIcon(false), draggable: true, autoPan: true, pmIgnore: true });
+  const w = { marker };
+  marker.on("drag", () => schedule(60));
+  marker.on("dragend", () => schedule());
+  marker.on("contextmenu", (e) => { L.DomEvent.preventDefault(e); removeWell(w); });
+  marker.addTo(marks);
+  state.wells.push(w);
+  if (run) { updateWellsInfo(); schedule(); }
+}
+function removeWell(w) {
+  marks.removeLayer(w.marker);
+  state.wells = state.wells.filter((x) => x !== w);
+  updateWellsInfo();
+  schedule();
+}
+function clearWells() {
+  state.wells.forEach((w) => marks.removeLayer(w.marker));
+  state.wells = [];
+  updateWellsInfo();
+  schedule();
+}
+function updateWellsInfo() {
+  const n = state.wells.length;
+  $("wells-info").textContent = n ? `${n} well${n > 1 ? "s" : ""}.` : "No wells yet.";
+}
+function setAddMode(on) {
+  state.addMode = on;
+  $("btn-add-wells").classList.toggle("on", on);
+  $("btn-add-wells").textContent = on ? "Done adding wells" : "Click to add wells";
+  map.getContainer().style.cursor = on ? "crosshair" : "";
+  tip(on ? "Click the map to place wells." : null);
+}
+$("btn-add-wells").onclick = () => { map.pm.disableDraw(); setAddMode(!state.addMode); };
+$("btn-clear-wells").onclick = clearWells;
+map.on("click", (e) => { if (state.addMode) addWell(e.latlng); });
+
+// A ring of n wells, evenly spaced along the outline offset outward from the excavation.
+function ringWells(n, offset) {
+  const f = excFeature();
+  if (!f) return null;
+  const buf = offset > 0 ? turf.buffer(f, offset, { units: "meters", steps: 16 }) : f;
+  const geom = buf.geometry.type === "MultiPolygon" ? buf.geometry.coordinates[0] : buf.geometry.coordinates;
+  const line = turf.lineString(geom[0]);
+  const len = turf.length(line, { units: "meters" });
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const [lng, lat] = turf.along(line, len * i / n, { units: "meters" }).geometry.coordinates;
+    out.push(L.latLng(lat, lng));
+  }
+  return out;
+}
+$("btn-generate").onclick = () => {
+  if (!state.excavation) { alertMsg("Draw or load the excavation first."); return; }
+  const n = Math.round(num("in-nwells")), off = num("in-offset");
+  if (!(n >= 1) || !(off >= 0)) { alertMsg("Enter a number of wells and an offset of zero or more."); return; }
+  clearWells();
+  ringWells(n, off).forEach((ll) => addWell(ll, false));
+  updateWellsInfo();
+  schedule();
+};
+
+// ------------------------------------------------------------------ analysis
+let timer = null;
+function schedule(ms = 150) {
+  clearTimeout(timer);
+  timer = setTimeout(run, ms);
+  persist();
+}
+
+function analysisBox(pts) {
+  const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+  let x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const span = Math.max(x1 - x0, y1 - y0, 20), pad = Math.max(0.9 * span, 60);
+  return [x0 - pad, x1 + pad, y0 - pad, y1 + pad];
+}
+
+// Check points: a grid over the excavation and points along its edge.
+function checkPoints(ring) {
+  const box = analysisBox(ring);
+  const span = Math.max(box[1] - box[0], box[3] - box[2]);
+  const xs = ring.map((p) => p.x), ys = ring.map((p) => p.y);
+  const nx = 60, b = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const ny = Math.max(10, Math.round(nx * (b[3] - b[2]) / Math.max(b[1] - b[0], 1e-6)));
+  const pts = grid(b, nx, Math.min(ny, 200)).filter((p) => inside(p, ring));
+  return pts.concat(densify(ring, span / 400));
+}
+
+function run() {
+  clearResults();
+  const p = params(), err = checkParams(p);
+  const ringLL = excRing();
+  if (err) return setStatus("bad", err);
+  if (!ringLL && !state.wells.length) return setStatus("idle", "Draw an excavation and add wells.");
+  if (!state.origin) setOrigin((ringLL ? state.excavation.getBounds() : L.latLngBounds(state.wells.map((w) => w.marker.getLatLng()))).getCenter());
+  const ring = ringLL ? ringLL.map(toXY) : null;
+  const wells = state.wells.map((w) => toXY(w.marker.getLatLng()));
+  if (!wells.length) return setStatus("idle", "Add wells: click on the map, or generate a ring.");
+  const n = wells.length, qEach = p.Q / n;
+  const W = wells.map((w) => ({ ...w, q: qEach }));
+
+  // the results grid
+  const box = analysisBox([...(ring || []), ...wells]);
+  const nx = 220, ny = Math.round(nx * (box[3] - box[2]) / (box[1] - box[0]));
+  const G = grid(box, nx, ny);
+  const { h } = heads(G, W, p);
+
+  // the excavation: the highest head inside it
+  let hmax = null, at = null;
+  if (ring) {
+    const cp = checkPoints(ring);
+    const hc = heads(cp, W, p).h;
+    hmax = -Infinity;
+    hc.forEach((v, i) => { if (v > hmax) { hmax = v; at = cp[i]; } });
+  }
+  // the wells: the head at each well's radius
+  const hw = heads(wells.map((w) => ({ x: w.x + p.rw, y: w.y })), W, p).h;
+  const dryWells = [];
+  hw.forEach((v, i) => { state.wells[i].marker.setIcon(wellIcon(v <= 0)); if (v <= 0) dryWells.push(i); });
+
+  state.last = { p, box, nx, ny, h, ring, wells, hmax, at, hw, qEach };
+  drawResults();
+
+  // status and numbers
+  const rows = [
+    ["Wells", n],
+    ["Rate per well", fmtQ(qEach)],
+    ["Total rate, Q", fmtQ(p.Q)],
+  ];
+  if (ring) {
+    rows.push(["Highest head in the excavation", `${fmt(hmax, 2)} m`]);
+    rows.push(["Target head", `${fmt(p.target, 2)} m`]);
+    rows.push(["Margin (target − highest)", `${fmt(p.target - hmax, 2)} m`]);
+  }
+  rows.push(["Lowest head at a well", `${fmt(Math.min(...hw), 2)} m`]);
+  $("results").innerHTML = rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("");
+  if (dryWells.length) {
+    setStatus("bad", `${dryWells.length} well${dryWells.length > 1 ? "s" : ""} pumped dry (shown red): the rate is more than the aquifer can deliver there. Add wells or lower Q.`);
+  } else if (!ring) {
+    setStatus("idle", "Draw or load the excavation to check the design.");
+  } else if (hmax <= p.target) {
+    setStatus("ok", `Dewatered: the water is at or below the target head everywhere in the excavation.`);
+  } else {
+    setStatus("warn", `Not dewatered: the water is ${fmt(hmax - p.target, 2)} m above the target at the marked point.`);
+  }
+}
+
+// ------------------------------------------------------------------ drawing
+function clearResults() {
+  lines.clearLayers();
+  shade.clearLayers();
+  marks.eachLayer((l) => { if (l.options && l.options.highPoint) marks.removeLayer(l); });
+  fill.setUrl("data:image/gif;base64,R0lGODlhAQABAAAAACw=");
+  $("legend").hidden = true;
+}
+
+function fieldValues(last) {
+  const { h, p } = last, kind = $("in-field").value;
+  const v = new Float64Array(h.length);
+  for (let i = 0; i < h.length; i++) v[i] = kind === "h" ? h[i] : kind === "s" ? p.H - h[i] : p.target - h[i];
+  const title = kind === "h" ? "Head, h (m)" : kind === "s" ? "Drawdown, H − h (m)" : "Head below target (m)";
+  return { v, title, kind };
+}
+
+function niceLevels(lo, hi) {
+  const iv = parseFloat($("in-interval").value);
+  if (iv > 0) {
+    const out = [];
+    for (let t = Math.ceil(lo / iv) * iv; t <= hi + 1e-9 && out.length < 400; t += iv) out.push(+t.toFixed(10));
+    return out;
+  }
+  return d3.ticks(lo, hi, 12);
+}
+
+function drawResults() {
+  const last = state.last;
+  if (!last) return;
+  clearResults();
+  const { box, nx, ny, p } = last;
+  const { v, title, kind } = fieldValues(last);
+  const lo = d3.min(v), hi = d3.max(v);
+  if (!(hi > lo)) return;
+  // the target always gets its own contour
+  const tgt = kind === "h" ? p.target : kind === "depth" ? 0 : p.H - p.target;
+  const levels = [...new Set([...niceLevels(lo, hi), ...(tgt > lo && tgt < hi ? [tgt] : [])])].sort((a, b) => a - b);
+  // low head (deep drawdown) dark
+  const color = d3.scaleSequential(d3.interpolateYlGnBu).domain(kind === "h" ? [hi, lo] : [lo, hi]);
+  const op = parseFloat($("in-opacity").value);
+
+  // color fill: a raster over the analysis box
+  const cornerLL = [toLL({ x: box[0], y: box[2] }), toLL({ x: box[1], y: box[3] })];
+  if ($("in-fill").checked) {
+    const cv = document.createElement("canvas");
+    cv.width = nx; cv.height = ny;
+    const ctx = cv.getContext("2d"), img = ctx.createImageData(nx, ny);
+    for (let i = 0; i < v.length; i++) {
+      const c = d3.rgb(color(v[i]));
+      img.data[4 * i] = c.r; img.data[4 * i + 1] = c.g; img.data[4 * i + 2] = c.b; img.data[4 * i + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    fill.setBounds(L.latLngBounds(cornerLL));
+    fill.setUrl(cv.toDataURL());
+    fill.setOpacity(op);
+  }
+
+  // contour lines, labeled; the grid's own edges are left out
+  const toWorld = ([cx, cy]) => toLL({
+    x: box[0] + (cx - 0.5) / (nx - 1) * (box[1] - box[0]),
+    y: box[3] - (cy - 0.5) / (ny - 1) * (box[3] - box[2]),
+  });
+  const onEdge = ([cx, cy]) => cx <= 0.5 || cx >= nx - 0.5 || cy <= 0.5 || cy >= ny - 0.5;
+  const contours = d3.contours().size([nx, ny]).thresholds(levels)(Array.from(v));
+  const exportLines = [];
+  for (const c of contours) {
+    const major = Math.abs(c.value - tgt) < 1e-9;
+    for (const poly of c.coordinates) for (const ringPts of poly) {
+      let seg = [];
+      const flush = () => {
+        if (seg.length > 2) {
+          const ll = seg.map(toWorld);
+          L.polyline(ll, { pane: "results", color: major ? "#E8582C" : "#1d2733", weight: major ? 2.5 : 1, opacity: 0.85, interactive: false }).addTo(lines);
+          exportLines.push({ value: c.value, coords: ll.map((q) => [q.lng, q.lat]) });
+          if (seg.length > 12) {
+            L.tooltip({ permanent: true, direction: "center", className: "contour-label", interactive: false })
+              .setLatLng(ll[Math.floor(ll.length / 2)]).setContent(fmt(c.value, levelDigits(levels))).addTo(lines);
+          }
+        }
+        seg = [];
+      };
+      for (const q of ringPts) { if (onEdge(q)) flush(); else seg.push(q); }
+      flush();
+    }
+  }
+  last.exportLines = exportLines;
+
+  // where the head is below the target
+  if ($("in-dewatered").checked) {
+    const below = Array.from(last.h, (x) => p.target - x);
+    const [cz] = d3.contours().size([nx, ny]).thresholds([0])(below);
+    if (cz && cz.coordinates.length) {
+      const polys = cz.coordinates.map((poly) => poly.map((r) => r.map(toWorld)));
+      L.polygon(polys, { pane: "results", color: "#1e7a46", weight: 1.5, dashArray: "6,4", fillColor: "#2fa866", fillOpacity: 0.18, interactive: false }).addTo(shade);
+    }
+  }
+
+  // the highest point in the excavation
+  if (last.at && last.hmax > p.target) {
+    L.circleMarker(toLL(last.at), { radius: 7, color: "#b3261e", weight: 3, fill: false, highPoint: true })
+      .bindTooltip(`Highest water in the excavation: h = ${fmt(last.hmax, 2)} m`).addTo(marks);
+  }
+
+  // legend
+  const stops = d3.range(0, 1.0001, 0.1).map((t) => color(kind === "h" ? hi - t * (hi - lo) : lo + t * (hi - lo)));
+  $("legend").innerHTML = `<h4>${title}</h4><div class="bar" style="background:linear-gradient(to right, ${stops.join(",")})"></div>`
+    + `<div class="ticks"><span>${fmt(kind === "h" ? hi : lo, 1)}</span><span>${fmt(kind === "h" ? lo : hi, 1)}</span></div>`
+    + `<div class="key"><span class="sw" style="background:#E8582C;height:3px"></span>Target contour</div>`
+    + ($("in-dewatered").checked ? `<div class="key"><span class="sw" style="background:rgba(47,168,102,.35);border:1px dashed #1e7a46"></span>Below the target</div>` : "");
+  $("legend").hidden = false;
+}
+const levelDigits = (lv) => (lv.length > 1 && lv[1] - lv[0] < 1 ? 1 : 0);
+
+["in-field", "in-interval", "in-fill", "in-dewatered"].forEach((id) => $(id).addEventListener("change", () => { drawResults(); persist(); }));
+$("in-opacity").addEventListener("input", () => fill.setOpacity(parseFloat($("in-opacity").value)));
+["in-k", "in-k-unit", "in-H", "in-R", "in-target", "in-rw", "in-Q", "in-Q-unit"].forEach((id) => $(id).addEventListener("input", () => schedule(250)));
+
+// ------------------------------------------------------------------ least Q
+$("btn-optimize").onclick = () => {
+  const p = params(), err = checkParams({ ...p, Q: 0 });
+  if (err) return setStatus("bad", err);
+  const ring = excRing();
+  if (!ring || !state.wells.length) return setStatus("idle", "The least Q needs an excavation and wells.");
+  const r = ring.map(toXY), wells = state.wells.map((w) => toXY(w.marker.getLatLng()));
+  const opt = optimalRate(checkPoints(r), wells, p, p.target);
+  if (!opt || !isFinite(opt.Q)) return setStatus("bad", "No pumping rate works with these wells.");
+  $("in-Q").value = +(opt.Q / parseFloat($("in-Q-unit").value)).toPrecision(5);
+  run();
+  if (opt.feasible) setStatus("ok", `Least Q found: ${fmtQ(opt.Q)}. The highest water in the excavation is exactly at the target.`);
+  if (!opt.feasible) setStatus("bad", "The least rate that dewaters the excavation would pump a well dry. Add wells, or move them farther out.");
+};
+
+// ------------------------------------------------------------------ design curve
+let curveRows = [];
+$("btn-curve").onclick = () => {
+  const p = params(), err = checkParams({ ...p, Q: 0 });
+  if (err) return setStatus("bad", err);
+  if (!state.excavation) return setStatus("idle", "The design curve needs an excavation.");
+  const n0 = Math.max(1, Math.round(num("in-nmin"))), n1 = Math.round(num("in-nmax")), off = num("in-offset");
+  if (!(n1 > n0)) return alertMsg("Enter a range of numbers of wells, smallest first.");
+  const cp = checkPoints(excRing().map(toXY));
+  curveRows = [];
+  for (let n = n0; n <= Math.min(n1, n0 + 300); n++) {
+    const wells = ringWells(n, off).map(toXY);
+    const o = optimalRate(cp, wells, p, p.target);
+    curveRows.push({ n, Q: o.Q, qEach: o.qEach, feasible: o.feasible });
+  }
+  drawCurve();
+  $("dlg-curve").showModal();
+};
+function drawCurve() {
+  const uq = parseFloat($("in-Q-unit").value), unit = $("in-Q-unit").selectedOptions[0].textContent;
+  const el = $("curve-chart");
+  el.innerHTML = "";
+  const W = Math.min(720, window.innerWidth * 0.9), H = 360, m = { l: 70, r: 20, t: 14, b: 46 };
+  const ok = curveRows.filter((r) => isFinite(r.Q));
+  const x = d3.scaleLinear().domain(d3.extent(curveRows, (r) => r.n)).range([m.l, W - m.r]);
+  const lo = d3.min(ok, (r) => r.Q / uq), hi = d3.max(ok, (r) => r.Q / uq);
+  const y = d3.scaleLinear().domain([Math.max(0, lo - 0.1 * (hi - lo || lo)), hi + 0.05 * (hi - lo || lo)]).nice().range([H - m.b, m.t]);
+  const svg = d3.select(el).append("svg").attr("class", "chart").attr("width", W).attr("height", H);
+  svg.append("g").attr("transform", `translate(0,${H - m.b})`).call(d3.axisBottom(x).ticks(10).tickFormat(d3.format("d")));
+  svg.append("g").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(8));
+  svg.append("g").attr("stroke", "#e5eaef").selectAll("line").data(y.ticks(8)).join("line")
+    .attr("x1", m.l).attr("x2", W - m.r).attr("y1", (d) => y(d)).attr("y2", (d) => y(d));
+  svg.append("path").datum(ok).attr("fill", "none").attr("stroke", "#1F4E79").attr("stroke-width", 2.5)
+    .attr("d", d3.line().x((r) => x(r.n)).y((r) => y(r.Q / uq)));
+  svg.append("g").selectAll("circle").data(ok).join("circle").attr("cx", (r) => x(r.n)).attr("cy", (r) => y(r.Q / uq)).attr("r", 3.5)
+    .attr("fill", (r) => (r.feasible ? "#1F4E79" : "#b3261e"))
+    .append("title").text((r) => `${r.n} wells: Q = ${fmtNum(r.Q / uq)} ${unit}${r.feasible ? "" : " (a well runs dry)"}`);
+  svg.append("text").attr("class", "axis-title").attr("x", (m.l + W - m.r) / 2).attr("y", H - 8).attr("text-anchor", "middle").text("Number of wells, n");
+  svg.append("text").attr("class", "axis-title").attr("transform", `translate(16,${(m.t + H - m.b) / 2}) rotate(-90)`).attr("text-anchor", "middle").text(`Least total Q (${unit})`);
+  const bad = curveRows.filter((r) => !r.feasible).map((r) => r.n);
+  $("curve-note").textContent = `Rings at ${num("in-offset")} m from the edge, equal rates.`
+    + (bad.length ? ` Red points: the least rate would pump a well dry (n = ${bad.join(", ")}).` : "");
+}
+$("btn-curve-csv").onclick = () => {
+  const csv = "wells,total_Q_m3s,total_Q_gpm,q_per_well_m3s,feasible\n"
+    + curveRows.map((r) => `${r.n},${r.Q},${r.Q * GPM_PER_M3S},${r.qEach},${r.feasible}`).join("\n");
+  download("design_curve.csv", csv, "text/csv");
+};
+
+// ------------------------------------------------------------------ exports, save, load
+$("btn-export-wells").onclick = () => {
+  if (!state.last) return;
+  const { wells, qEach, hw } = state.last;
+  const csv = "well,lat,lng,x_m,y_m,q_m3s,q_gpm,head_at_well_m\n" + wells.map((w, i) => {
+    const ll = state.wells[i].marker.getLatLng();
+    return `${i + 1},${ll.lat.toFixed(7)},${ll.lng.toFixed(7)},${w.x.toFixed(2)},${w.y.toFixed(2)},${qEach},${qEach * GPM_PER_M3S},${hw[i].toFixed(3)}`;
+  }).join("\n");
+  download("wells.csv", csv, "text/csv");
+};
+$("btn-export-contours").onclick = () => {
+  if (!state.last || !state.last.exportLines) return;
+  const field = $("in-field").selectedOptions[0].textContent;
+  const fc = { type: "FeatureCollection", features: state.last.exportLines.map((l) => ({ type: "Feature", properties: { field, value: l.value }, geometry: { type: "LineString", coordinates: l.coords } })) };
+  download("contours.geojson", JSON.stringify(fc), "application/geo+json");
+};
+
+const INPUTS = ["in-k", "in-k-unit", "in-H", "in-R", "in-target", "in-rw", "in-Q", "in-Q-unit", "in-offset", "in-nwells", "in-field", "in-interval", "in-nmin", "in-nmax"];
+function project() {
+  const f = excFeature();
+  return {
+    app: "dewater", version: 1,
+    excavation: f ? f.geometry : null,
+    wells: state.wells.map((w) => { const ll = w.marker.getLatLng(); return [ll.lat, ll.lng]; }),
+    inputs: Object.fromEntries(INPUTS.map((id) => [id, $(id).value])),
+    view: { center: map.getCenter(), zoom: map.getZoom() },
+  };
+}
+function restore(pr, fit = true) {
+  if (!pr || pr.app !== "dewater") { alertMsg("That isn't a Dewater project file."); return; }
+  Object.entries(pr.inputs || {}).forEach(([id, v]) => { if ($(id)) $(id).value = v; });
+  if (state.excavation) { map.removeLayer(state.excavation); state.excavation = null; }
+  clearWells();
+  if (pr.excavation) {
+    const layer = L.polygon(pr.excavation.coordinates[0].slice(0, -1).map(([lng, lat]) => [lat, lng])).addTo(map);
+    setExcavation(layer, fit);
+  }
+  (pr.wells || []).forEach(([lat, lng]) => addWell(L.latLng(lat, lng), false));
+  updateWellsInfo();
+  if (!fit && pr.view) map.setView(pr.view.center, pr.view.zoom);
+  schedule();
+}
+$("btn-save").onclick = () => download("dewater_project.json", JSON.stringify(project(), null, 1), "application/json");
+$("file-project").onchange = (e) => readFile(e.target.files[0], (t) => restore(JSON.parse(t)));
+
+// the last session comes back on reload (this browser only)
+function persist() { try { localStorage.setItem("dewater:last", JSON.stringify(project())); } catch (e) { /* storage unavailable */ } }
+
+// ------------------------------------------------------------------ search
+$("search").onsubmit = async (e) => {
+  e.preventDefault();
+  const q = $("search-q").value.trim();
+  if (!q) return;
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`, { headers: { Accept: "application/json" } });
+    const [hit] = await r.json();
+    if (!hit) return tip("No place found.", 2500);
+    const [s, n, w, ea] = hit.boundingbox.map(Number);
+    map.fitBounds([[s, w], [n, ea]], { maxZoom: 18 });
+  } catch (err) { tip("Search is unavailable right now.", 2500); }
+};
+
+// ------------------------------------------------------------------ small helpers
+function setStatus(kind, text) { const el = $("status"); el.className = `status ${kind}`; el.textContent = text; if (kind !== "ok" && kind !== "warn" && kind !== "bad") $("results").innerHTML = ""; }
+let tipTimer = null;
+function tip(text, ms) {
+  clearTimeout(tipTimer);
+  $("maptip").hidden = !text;
+  if (text) $("maptip").textContent = text;
+  if (text && ms) tipTimer = setTimeout(() => ($("maptip").hidden = true), ms);
+}
+function alertMsg(t) { tip(t, 3500); }
+function fmt(v, d) { return Number.isFinite(v) ? v.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }) : "—"; }
+function fmtNum(v) { return Number.isFinite(v) ? +v.toPrecision(4) : "—"; }
+function fmtQ(q) { return `${fmtNum(q)} m³/s (${fmtNum(q * GPM_PER_M3S)} gpm)`; }
+function download(name, text, type) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+function readFile(file, cb) { if (!file) return; const r = new FileReader(); r.onload = () => { try { cb(r.result); } catch (e) { alertMsg("Couldn't read that file."); } }; r.readAsText(file); }
+
+document.querySelectorAll("[data-close]").forEach((b) => (b.onclick = () => b.closest("dialog").close()));
+$("btn-help").onclick = () => $("dlg-help").showModal();
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { setAddMode(false); map.pm.disableDraw(); tip(null); } });
+
+// ------------------------------------------------------------------ start
+try {
+  const saved = JSON.parse(localStorage.getItem("dewater:last") || "null");
+  if (saved && (saved.excavation || (saved.wells || []).length)) restore(saved, false);
+} catch (e) { /* first visit, or storage unavailable */ }
+updateExcInfo();
+updateWellsInfo();
