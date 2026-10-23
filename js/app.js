@@ -96,6 +96,8 @@ for (const [id, units] of [["in-k", K_UNITS], ["in-Q", Q_UNITS]]) {
   sel.addEventListener("change", () => {
     const v = parseFloat($(id).value);
     if (Number.isFinite(v)) $(id).value = trim(v * units[sel.dataset.prev] / units[sel.value]);
+    if (id === "in-k") ["in-kmin", "in-kmax"].forEach((i2) => { const v2 = parseFloat($(i2).value); if (Number.isFinite(v2)) $(i2).value = trim(v2 * units[sel.dataset.prev] / units[sel.value]); });
+    if (id === "in-k") syncCurveInputs();
     sel.dataset.prev = sel.value;
     schedule();
     if (curveRows.length && $("dlg-curve").open) drawCurve();
@@ -126,7 +128,7 @@ const mode = () => document.querySelector('input[name="mode"]:checked').value;
 function params() {
   const p = {
     k: num("in-k") * K_UNITS[$("in-k-unit").value],
-    R: numL("in-R"), rw: numL("in-rw"),
+    R: numL("in-R"), rw: numL("in-rw"), Rmethod: $("in-R-method").value,
     Q: num("in-Q") * Qf(),
     site: null,
   };
@@ -139,9 +141,27 @@ function params() {
     p.H = numL("in-H");
     p.target = numL("in-target");
   }
+  if (p.Rmethod !== "entered") p.R = radius(p, p.k);
   return p;
 }
+// The radius of influence from the empirical formulas (Bear 1979, p. 306), in meters with k in
+// m/s; s is the drawdown the design needs, H minus the target head.
+function radius(p, k) {
+  const s = p.H - p.target;
+  if (p.Rmethod === "sichardt") return 3000 * s * Math.sqrt(k);
+  if (p.Rmethod === "kusakin") return 575 * s * Math.sqrt(p.H * k);
+  return p.R;
+}
+function showR() {
+  const p = params(), auto = p.Rmethod !== "entered";
+  $("in-R").readOnly = auto;
+  $("R-note").hidden = !auto;
+  if (auto && Number.isFinite(p.R)) $("in-R").value = trim(p.R / Lf());
+}
+$("in-R-method").addEventListener("change", () => { showR(); schedule(); });
+
 function updateDerived() {
+  showR();
   const p = params(), s = p.site;
   if (s && [s.dwt, s.dbase, s.dexc].every(Number.isFinite)) {
     $("derived").textContent = `Saturated thickness H = ${fmtL(p.H, 2)}. The water must come down to ${fmtL(s.dexc + s.margin, 2)} below ground: a head of ${fmtL(p.target, 2)} above the low-k layer.`
@@ -559,6 +579,35 @@ function drawResults() {
 }
 const levelDigits = (lv) => (lv.length > 1 && lv[1] - lv[0] < 1 ? 1 : 0);
 
+// The color ramp picker: a button showing the current ramp, opening a menu of ramps drawn as
+// color bars. The hidden select keeps the value (saved with the project).
+function rampCss(name, rev) {
+  const f = d3[`interpolate${name}`];
+  const st = d3.range(0, 1.0001, 0.1).map((t) => f(rev ? 1 - t : t));
+  return `linear-gradient(to right, ${st.join(",")})`;
+}
+function buildRampPicker() {
+  const sel = $("in-ramp"), btn = $("ramp-btn"), menu = $("ramp-menu");
+  menu.innerHTML = "";
+  [...sel.options].forEach((o) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "ramp-item"; b.setAttribute("role", "option");
+    b.innerHTML = `<span class="ramp-bar" style="background:${rampCss(o.value, $("in-ramp-rev").checked)}"></span><span>${o.textContent}</span>`;
+    b.onclick = () => { sel.value = o.value; menu.hidden = true; syncRampBtn(); drawResults(); persist(); };
+    menu.appendChild(b);
+  });
+  btn.onclick = (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; };
+  document.addEventListener("click", (e) => { if (!menu.contains(e.target)) menu.hidden = true; });
+  syncRampBtn();
+}
+function syncRampBtn() {
+  const sel = $("in-ramp");
+  $("ramp-btn").innerHTML = `<span class="ramp-bar" style="background:${rampCss(sel.value, $("in-ramp-rev").checked)}"></span><span class="ramp-name">${sel.selectedOptions[0].textContent}</span><span class="caret">▾</span>`;
+  [...$("ramp-menu").children].forEach((b, i) => b.classList.toggle("on", i === sel.selectedIndex));
+}
+$("in-ramp-rev").addEventListener("change", buildRampPicker);
+buildRampPicker();
+
 ["in-field", "in-interval", "in-fill", "in-dewatered", "in-ramp", "in-ramp-rev"].forEach((id) => $(id).addEventListener("change", () => { drawResults(); persist(); }));
 $("in-opacity").addEventListener("input", () => fill.setOpacity(parseFloat($("in-opacity").value)));
 ["in-k", "in-k-unit", "in-H", "in-R", "in-target", "in-rw", "in-Q", "in-Q-unit", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev"]
@@ -825,53 +874,97 @@ $("btn-optimize").onclick = () => {
   if (!opt.feasible) setStatus("bad", "The least rate that dewaters the excavation would pump a well dry. Add wells, or move them farther out.");
 };
 
-// ------------------------------------------------------------------ design curve
-let curveRows = [];
+// ------------------------------------------------------------------ design curves
+// Least total Q against the number of wells (rings at the offset), or against k for the wells on
+// the map. With R entered, Q is exactly proportional to k; with R from Sichardt or Kusakin, R
+// grows with √k and Q grows more slowly. The k curve shows both, so the role of R is plain.
+let curveRows = [], curveVar = "n";
+const kUnitLabel = () => $("in-k-unit").selectedOptions[0].textContent;
+function syncCurveInputs() {
+  const v = $("in-curve-var").value;
+  $("curve-n").hidden = v !== "n"; $("curve-k").hidden = v !== "k";
+  document.querySelectorAll(".uK").forEach((e) => (e.textContent = kUnitLabel()));
+  $("curve-hint").textContent = v === "n" ? "Past some n, more wells barely lower Q."
+    : "For the wells on the map. With R entered, Q is simply proportional to k; choose Sichardt or Kusakin for R to see how R's growth with k changes that.";
+}
+$("in-curve-var").addEventListener("change", syncCurveInputs);
 $("btn-curve").onclick = () => {
   const p = params(), err = checkParams({ ...p, Q: 0 });
   if (err) return setStatus("bad", err);
   if (!state.excavation) return setStatus("idle", "The design curve needs an excavation.");
-  const n0 = Math.max(1, Math.round(num("in-nmin"))), n1 = Math.round(num("in-nmax")), off = numL("in-offset");
-  if (!(n1 > n0)) return alertMsg("Enter a range of numbers of wells, smallest first.");
   const cp = checkPoints(excRing().map(toXY));
+  curveVar = $("in-curve-var").value;
   curveRows = [];
-  for (let n = n0; n <= Math.min(n1, n0 + 300); n++) {
-    const wells = ringWells(n, off).map(toXY);
-    const o = optimalRate(cp, wells, p, p.target);
-    curveRows.push({ n, Q: o.Q, qEach: o.qEach, feasible: o.feasible });
+  if (curveVar === "n") {
+    const n0 = Math.max(1, Math.round(num("in-nmin"))), n1 = Math.round(num("in-nmax")), off = numL("in-offset");
+    if (!(n1 > n0)) return alertMsg("Enter a range of numbers of wells, smallest first.");
+    for (let n = n0; n <= Math.min(n1, n0 + 300); n++) {
+      const wells = ringWells(n, off).map(toXY);
+      const o = optimalRate(cp, wells, p, p.target);
+      curveRows.push({ x: n, Q: o.Q, qEach: o.qEach, feasible: o.feasible });
+    }
+  } else {
+    if (!state.wells.length) return alertMsg("Place or generate the wells first.");
+    const ku = K_UNITS[$("in-k-unit").value], k0 = num("in-kmin") * ku, k1 = num("in-kmax") * ku;
+    if (!(k0 > 0 && k1 > k0)) return alertMsg("Enter a range of k, smallest first.");
+    const wells = state.wells.map((w) => toXY(w.marker.getLatLng()));
+    for (let i = 0; i <= 30; i++) {
+      const k = k0 * (k1 / k0) ** (i / 30);
+      const pk = { ...p, k, R: radius(p, k) };
+      if (!(pk.R > pk.rw)) continue;
+      const o = optimalRate(cp, wells, pk, p.target), of = optimalRate(cp, wells, { ...p, k }, p.target);
+      curveRows.push({ x: k, R: pk.R, Q: o.Q, qEach: o.qEach, feasible: o.feasible, Qfixed: of.Q });
+    }
   }
   drawCurve();
   $("dlg-curve").showModal();
 };
 function drawCurve() {
-  const uq = Qf(), unit = Qn();
+  const uq = Qf(), unit = Qn(), byK = curveVar === "k", ku = K_UNITS[$("in-k-unit").value];
+  const auto = byK && params().Rmethod !== "entered";
   const el = $("curve-chart");
   el.innerHTML = "";
   const W = Math.min(720, window.innerWidth * 0.9), H = 360, m = { l: 70, r: 20, t: 14, b: 46 };
   const ok = curveRows.filter((r) => isFinite(r.Q));
-  const x = d3.scaleLinear().domain(d3.extent(curveRows, (r) => r.n)).range([m.l, W - m.r]);
-  const lo = d3.min(ok, (r) => r.Q / uq), hi = d3.max(ok, (r) => r.Q / uq);
-  const y = d3.scaleLinear().domain([Math.max(0, lo - 0.1 * (hi - lo || lo)), hi + 0.05 * (hi - lo || lo)]).nice().range([H - m.b, m.t]);
+  const xv = (r) => (byK ? r.x / ku : r.x);
+  const x = (byK ? d3.scaleLog() : d3.scaleLinear()).domain(d3.extent(ok, xv)).range([m.l, W - m.r]);
+  const ys = ok.flatMap((r) => (auto ? [r.Q, r.Qfixed] : [r.Q]).map((q) => q / uq));
+  const lo = d3.min(ys), hi = d3.max(ys);
+  const y = byK ? d3.scaleLog().domain([lo / 1.1, hi * 1.1]).range([H - m.b, m.t])
+    : d3.scaleLinear().domain([Math.max(0, lo - 0.1 * (hi - lo || lo)), hi + 0.05 * (hi - lo || lo)]).nice().range([H - m.b, m.t]);
   const svg = d3.select(el).append("svg").attr("class", "chart").attr("width", W).attr("height", H);
-  svg.append("g").attr("transform", `translate(0,${H - m.b})`).call(d3.axisBottom(x).ticks(10).tickFormat(d3.format("d")));
-  svg.append("g").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(8));
+  svg.append("g").attr("transform", `translate(0,${H - m.b})`).call(byK ? d3.axisBottom(x).ticks(6, "~g") : d3.axisBottom(x).ticks(10).tickFormat(d3.format("d")));
+  svg.append("g").attr("transform", `translate(${m.l},0)`).call(byK ? d3.axisLeft(y).ticks(6, "~g") : d3.axisLeft(y).ticks(8));
   svg.append("g").attr("stroke", "#e5eaef").selectAll("line").data(y.ticks(8)).join("line")
     .attr("x1", m.l).attr("x2", W - m.r).attr("y1", (d) => y(d)).attr("y2", (d) => y(d));
+  if (auto) {
+    svg.append("path").datum(ok).attr("fill", "none").attr("stroke", "#8a96a3").attr("stroke-width", 2).attr("stroke-dasharray", "6,4")
+      .attr("d", d3.line().x((r) => x(xv(r))).y((r) => y(r.Qfixed / uq)));
+  }
   svg.append("path").datum(ok).attr("fill", "none").attr("stroke", "#1F4E79").attr("stroke-width", 2.5)
-    .attr("d", d3.line().x((r) => x(r.n)).y((r) => y(r.Q / uq)));
-  svg.append("g").selectAll("circle").data(ok).join("circle").attr("cx", (r) => x(r.n)).attr("cy", (r) => y(r.Q / uq)).attr("r", 3.5)
+    .attr("d", d3.line().x((r) => x(xv(r))).y((r) => y(r.Q / uq)));
+  svg.append("g").selectAll("circle").data(ok).join("circle").attr("cx", (r) => x(xv(r))).attr("cy", (r) => y(r.Q / uq)).attr("r", 3.5)
     .attr("fill", (r) => (r.feasible ? "#1F4E79" : "#b3261e"))
-    .append("title").text((r) => `${r.n} wells: Q = ${fmtNum(r.Q / uq)} ${unit}${r.feasible ? "" : " (a well runs dry)"}`);
-  svg.append("text").attr("class", "axis-title").attr("x", (m.l + W - m.r) / 2).attr("y", H - 8).attr("text-anchor", "middle").text("Number of wells, n");
+    .append("title").text((r) => `${byK ? `k = ${fmtNum(xv(r))} ${kUnitLabel()}, R = ${fmtL(r.R, 0)}` : `${r.x} wells`}: Q = ${fmtNum(r.Q / uq)} ${unit}${r.feasible ? "" : " (a well runs dry)"}`);
+  if (auto) {
+    const lg = svg.append("g").attr("transform", `translate(${m.l + 12},${m.t + 8})`);
+    [["#1F4E79", "", `R from ${params().Rmethod === "sichardt" ? "Sichardt" : "Kusakin"} (grows with √k)`], ["#8a96a3", "6,4", `R fixed at ${fmtL(params().R, 0)}`]].forEach(([c, dash, t], i) => {
+      lg.append("line").attr("x1", 0).attr("x2", 26).attr("y1", i * 18).attr("y2", i * 18).attr("stroke", c).attr("stroke-width", 2.5).attr("stroke-dasharray", dash);
+      lg.append("text").attr("x", 32).attr("y", i * 18 + 4).text(t);
+    });
+  }
+  svg.append("text").attr("class", "axis-title").attr("x", (m.l + W - m.r) / 2).attr("y", H - 8).attr("text-anchor", "middle").text(byK ? `Hydraulic conductivity, k (${kUnitLabel()})` : "Number of wells, n");
   svg.append("text").attr("class", "axis-title").attr("transform", `translate(16,${(m.t + H - m.b) / 2}) rotate(-90)`).attr("text-anchor", "middle").text(`Least total Q (${unit})`);
-  const bad = curveRows.filter((r) => !r.feasible).map((r) => r.n);
-  $("curve-note").textContent = `Rings at ${$("in-offset").value} ${Ln()} from the edge, equal rates.`
-    + (bad.length ? ` Red points: the least rate would pump a well dry (n = ${bad.join(", ")}).` : "");
+  $("curve-title").textContent = `Design curve: least total Q against ${byK ? "hydraulic conductivity" : "number of wells"}`;
+  const bad = curveRows.filter((r) => !r.feasible).map((r) => (byK ? fmtNum(xv(r)) : r.x));
+  $("curve-note").textContent = (byK ? `The ${state.wells.length} wells on the map, equal rates.${auto ? "" : " R is entered, so Q is proportional to k."}` : `Rings at ${$("in-offset").value} ${Ln()} from the edge, equal rates.`)
+    + (bad.length ? ` Red points: the least rate would pump a well dry (${byK ? `${bad.length} of ${curveRows.length} values of k, from ${bad[0]} to ${bad[bad.length - 1]} ${kUnitLabel()}` : `n = ${bad.join(", ")}`}).` : "");
 }
 $("btn-curve-csv").onclick = () => {
-  const u = Qn().replace("³", "3").replace("/", "_per_");
-  const csv = `wells,total_Q_${u},q_per_well_${u},feasible\n`
-    + curveRows.map((r) => `${r.n},${trim(r.Q / Qf())},${trim(r.qEach / Qf())},${r.feasible}`).join("\n");
+  const u = Qn().replace("³", "3").replace("/", "_per_"), ku = K_UNITS[$("in-k-unit").value], kn = kUnitLabel().replace("/", "_per_");
+  const csv = curveVar === "k"
+    ? `k_${kn},R_${Ln()},total_Q_${u},total_Q_R_fixed_${u},feasible\n` + curveRows.map((r) => `${trim(r.x / ku)},${trim(r.R / Lf())},${trim(r.Q / Qf())},${trim(r.Qfixed / Qf())},${r.feasible}`).join("\n")
+    : `wells,total_Q_${u},q_per_well_${u},feasible\n` + curveRows.map((r) => `${r.x},${trim(r.Q / Qf())},${trim(r.qEach / Qf())},${r.feasible}`).join("\n");
   download("design_curve.csv", csv, "text/csv");
 };
 
@@ -893,7 +986,7 @@ $("btn-export-contours").onclick = () => {
   download("contours.geojson", JSON.stringify(fc), "application/geo+json");
 };
 
-const INPUTS = ["in-k", "in-k-unit", "in-H", "in-R", "in-target", "in-rw", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-Q", "in-Q-unit", "in-offset", "in-nwells", "in-field", "in-interval", "in-nmin", "in-nmax", "in-ramp"];
+const INPUTS = ["in-R-method", "in-curve-var", "in-kmin", "in-kmax", "in-k", "in-k-unit", "in-H", "in-R", "in-target", "in-rw", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-Q", "in-Q-unit", "in-offset", "in-nwells", "in-field", "in-interval", "in-nmin", "in-nmax", "in-ramp"];
 function project() {
   const f = excFeature();
   return {
@@ -929,6 +1022,7 @@ function restore(pr, fit = true) {
   updateWellsInfo();
   if (!fit && pr.view) map.setView(pr.view.center, pr.view.zoom);
   if (pr.section) setSection(L.latLng(...pr.section[0]), L.latLng(...pr.section[1]));
+  syncCurveInputs(); showR(); buildRampPicker();
   if (pr.terrain) { state.terrain = true; $("in-terrain").checked = true; $("in-gelev").readOnly = true; schedule(); }
   schedule();
 }
@@ -992,7 +1086,7 @@ function svgToPng(svg, name, title) {
   };
   img.src = url;
 }
-$("btn-curve-png").onclick = () => { const sv = $("curve-chart").querySelector("svg"); if (sv) svgToPng(sv, "design_curve.png", "Least total Q against number of wells"); };
+$("btn-curve-png").onclick = () => { const sv = $("curve-chart").querySelector("svg"); if (sv) svgToPng(sv, "design_curve.png", $("curve-title").textContent.replace("Design curve: ", "")); };
 $("btn-sec-png").onclick = () => { const sv = $("section-chart").querySelector("svg"); if (sv) svgToPng(sv, "cross_section.png", $("section-title").textContent); };
 $("btn-sec-csv").onclick = () => {
   const c = state.secData;
@@ -1023,3 +1117,4 @@ try {
 updateExcInfo();
 updateWellsInfo();
 updateDerived();
+syncCurveInputs();

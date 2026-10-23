@@ -8,7 +8,7 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%231F4E79'/%3E%3Cpath d='M4 13 Q16 30 28 13' fill='none' stroke='%23E8582C' stroke-width='3'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.css">
-  <link rel="stylesheet" href="css/style.css?v=15">
+  <link rel="stylesheet" href="css/style.css?v=18">
 </head>
 <body>
   <header class="topbar">
@@ -79,8 +79,16 @@
           <label class="span2">Hydraulic conductivity, k
             <span class="pair"><input id="in-k" type="number" step="any" value="5e-4">
               <select id="in-k-unit"><option value="cms" selected>cm/s</option><option value="ms">m/s</option><option value="mday">m/day</option><option value="fts">ft/s</option><option value="ftday">ft/day</option><option value="gpdft2">gal/day/ft²</option></select></span></label>
-          <label><span>Radius of influence, R (<span class="uL">m</span>)</span><input id="in-R" type="number" step="any" value="500"></label>
+          <label class="span2">Radius of influence, R
+            <select id="in-R-method">
+              <option value="entered" selected>Entered</option>
+              <option value="sichardt">Sichardt: R = 3000 s √k</option>
+              <option value="kusakin">Kusakin: R = 575 s √(Hk)</option>
+            </select></label>
+          <label><span>R (<span class="uL">m</span>)</span><input id="in-R" type="number" step="any" value="500"></label>
           <label><span>Well radius, r<sub>w</sub> (<span class="uL">m</span>)</span><input id="in-rw" type="number" step="any" value="0.15"></label>
+          <p class="hint span2" id="R-note" hidden>Empirical, in meters with k in m/s; s is the drawdown the design needs, H minus the
+            target head. Bear (1979), p. 306.</p>
         </div>
         <p class="hint">The aquifer sits on a low-permeability layer, and the ground and the water
           table start out level. The water must come down to the excavation bottom, plus any extra
@@ -130,12 +138,14 @@
         </div>
         <div class="fields two">
           <label>Color ramp
-            <select id="in-ramp">
+            <select id="in-ramp" hidden>
               <option value="YlGnBu" selected>Yellow–blue</option><option value="Viridis">Viridis</option>
               <option value="Cividis">Cividis</option><option value="Turbo">Turbo</option>
               <option value="Spectral">Spectral</option><option value="RdYlBu">Red–yellow–blue</option>
               <option value="Blues">Blues</option><option value="Greys">Grays</option>
-            </select></label>
+            </select>
+            <span class="ramp-pick"><button type="button" id="ramp-btn" class="ramp-btn" aria-haspopup="listbox"></button>
+              <span class="ramp-menu" id="ramp-menu" role="listbox" hidden></span></span></label>
           <label class="check ramp-rev"><input id="in-ramp-rev" type="checkbox"> Reverse</label>
         </div>
         <label class="check"><input id="in-fill" type="checkbox" checked> Color fill</label>
@@ -156,15 +166,20 @@
         </div>
       </section>
 
-      <!-- 6. Design curve -->
+      <!-- 6. Design curves -->
       <section class="step" id="step-curve">
-        <h2><span class="num">7</span>Design curve</h2>
-        <p class="hint">The least total Q for rings of n wells at the offset above. Past some n,
-          more wells barely lower Q.</p>
-        <div class="fields two">
+        <h2><span class="num">7</span>Design curves</h2>
+        <label class="fieldlike">Least total Q against
+          <select id="in-curve-var"><option value="n" selected>Number of wells (rings at the offset above)</option><option value="k">Hydraulic conductivity, k (these wells)</option></select></label>
+        <div class="fields two" id="curve-n">
           <label>From n<input id="in-nmin" type="number" step="1" min="3" value="4"></label>
           <label>To n<input id="in-nmax" type="number" step="1" min="4" value="40"></label>
         </div>
+        <div class="fields two" id="curve-k" hidden>
+          <label><span>From k (<span class="uK">cm/s</span>)</span><input id="in-kmin" type="number" step="any" value="1e-4"></label>
+          <label><span>To k (<span class="uK">cm/s</span>)</span><input id="in-kmax" type="number" step="any" value="1e-2"></label>
+        </div>
+        <p class="hint" id="curve-hint">Past some n, more wells barely lower Q.</p>
         <button id="btn-curve">Compute the design curve</button>
       </section>
 
@@ -196,7 +211,7 @@
   </main>
 
   <dialog id="dlg-curve" class="dlg">
-    <header><h2>Design curve: least total Q against number of wells</h2><button class="close" data-close>×</button></header>
+    <header><h2 id="curve-title">Design curve: least total Q against number of wells</h2><button class="close" data-close>×</button></header>
     <div id="curve-chart"></div>
     <p class="hint" id="curve-note"></p>
     <footer><button id="btn-curve-png">Download PNG</button><button id="btn-curve-csv">Download CSV</button><button data-close class="primary">Close</button></footer>
@@ -257,6 +272,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-  <script type="module" src="js/app.js?v=16"></script>
+  <script type="module" src="js/app.js?v=18"></script>
 </body>
 </html>
