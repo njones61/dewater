@@ -125,3 +125,5 @@ details.sub .fields { margin: 8px 0; }
 .seg label:has(input:checked) { background: var(--navy); color: #fff; }
 .seg input { display: none; }
 #derived { font-size: 12.5px; color: var(--navy-dark); background: var(--bg); border-radius: 6px; padding: 6px 8px; }
+
+[hidden] { display: none !important; }
