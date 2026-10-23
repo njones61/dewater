@@ -571,8 +571,9 @@ state.secDrawing = false;
 function setSection(a, b) {
   state.section = [a, b];
   $("section-panel").hidden = false;
+  $("divider").hidden = false;
+  map.invalidateSize();
   $("btn-sec-close").hidden = false;
-  $("legend").style.bottom = "300px";
   drawSection();
   persist();
 }
@@ -580,8 +581,9 @@ function hideSection() {
   state.section = null;
   secLayer.clearLayers();
   $("section-panel").hidden = true;
+  $("divider").hidden = true;
+  map.invalidateSize();
   $("btn-sec-close").hidden = true;
-  $("legend").style.bottom = "";
   persist();
 }
 // A line through the excavation's middle (or the wells'), east–west or north–south, reaching
@@ -636,7 +638,7 @@ function drawSection() {
   });
 
   el.innerHTML = "";
-  const Wd = el.clientWidth || 800, Ht = 240, m = { l: 56, r: 16, t: 10, b: 34 };
+  const Wd = el.clientWidth || 800, Ht = Math.max(110, el.clientHeight || 240), m = { l: 56, r: 16, t: 10, b: 34 };
   const x = d3.scaleLinear().domain([0, len]).range([m.l, Wd - m.r]);
   // heights above the low-k layer; with depths, the ground is at z = dbase and the axis reads
   // depth below ground (or elevation, when the ground elevation is given)
@@ -723,6 +725,30 @@ function drawSection() {
 }
 window.addEventListener("resize", () => drawSection());
 
+// The divider between the map and the section: drag (or arrow keys) to share the height.
+{
+  const div = $("divider"), pane = $("section-panel"), work = document.querySelector(".workarea");
+  const setH = (h) => {
+    const max = work.clientHeight - 120 - div.offsetHeight;
+    pane.style.height = `${Math.round(Math.min(Math.max(h, 140), max))}px`;
+    map.invalidateSize();
+    drawSection();
+  };
+  let y0 = 0, h0 = 0;
+  div.addEventListener("pointerdown", (e) => {
+    y0 = e.clientY; h0 = pane.offsetHeight;
+    div.setPointerCapture(e.pointerId); div.classList.add("dragging");
+  });
+  div.addEventListener("pointermove", (e) => { if (div.classList.contains("dragging")) setH(h0 - (e.clientY - y0)); });
+  const end = (e) => { if (!div.classList.contains("dragging")) return; div.classList.remove("dragging"); div.releasePointerCapture(e.pointerId); try { localStorage.setItem("dewater:secH", pane.style.height); } catch (_) { /* storage unavailable */ } };
+  div.addEventListener("pointerup", end);
+  div.addEventListener("pointercancel", end);
+  div.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); setH(pane.offsetHeight + (e.key === "ArrowUp" ? 24 : -24)); }
+  });
+  try { const h = localStorage.getItem("dewater:secH"); if (h) pane.style.height = h; } catch (_) { /* storage unavailable */ }
+}
+
 // ------------------------------------------------------------------ least Q
 $("btn-optimize").onclick = () => {
   const p = params(), err = checkParams({ ...p, Q: 0 });
@@ -732,7 +758,9 @@ $("btn-optimize").onclick = () => {
   const r = ring.map(toXY), wells = state.wells.map((w) => toXY(w.marker.getLatLng()));
   const opt = optimalRate(checkPoints(r), wells, p, p.target);
   if (!opt || !isFinite(opt.Q)) return setStatus("bad", "No pumping rate works with these wells.");
-  $("in-Q").value = trim(opt.Q / Qf());
+  // rounded up at six figures, so the entered rate still meets the target
+  const qv = opt.Q / Qf(), mag = 10 ** (Math.floor(Math.log10(qv)) - 5);
+  $("in-Q").value = trim(Math.ceil(qv / mag) * mag);
   run();
   if (opt.feasible) setStatus("ok", `Least Q found: ${fmtQ(opt.Q)}. The highest water in the excavation is exactly at the required level.`);
   if (!opt.feasible) setStatus("bad", "The least rate that dewaters the excavation would pump a well dry. Add wells, or move them farther out.");
