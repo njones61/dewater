@@ -71,8 +71,11 @@
             <span class="pair"><input id="in-gelev" type="number" step="any" placeholder="blank = depths only"><label class="switch" title="Read the ground from terrain data"><input id="in-terrain" type="checkbox"><span>Use terrain</span></label></span></label>
         </div>
         <div class="fields two" id="head-fields" hidden>
-          <label><span>Initial saturated thickness, H (<span class="uL">m</span>)</span><input id="in-H" type="number" step="any" value="50"></label>
+          <label><span>Ground surface (<span class="uL">m</span>)</span><input id="in-zg" type="number" step="any" value="55"></label>
+          <label><span>Water table, H (<span class="uL">m</span>)</span><input id="in-H" type="number" step="any" value="50"></label>
+          <label><span>Excavation bottom (<span class="uL">m</span>)</span><input id="in-zb" type="number" step="any" value="35"></label>
           <label><span>Target head (<span class="uL">m</span>)</span><input id="in-target" type="number" step="any" value="35"></label>
+          <p class="hint span2">Heights above the top of the low-k layer. H is the initial saturated thickness.</p>
         </div>
         <p class="readout" id="derived"></p>
         <div class="fields two">
@@ -259,7 +262,7 @@
           rectangle (Rotate turns it to match the site), or load a GeoJSON polygon.</li>
         <li>Enter the site: the depths to the water table, to the bottom of the aquifer (the top
           of the low-k layer), and of the excavation, and how far below the excavation bottom the
-          water must be. Or switch to entering H and the target head directly. A ground elevation
+          water must be. Or switch to heights above the low-k layer: the ground surface, the water table (H), the excavation bottom, and the target head. A ground elevation
           is optional; with it, results are also given as elevations. <b>Use terrain</b> fills it
           with the average ground elevation over the excavation, from open terrain data (USGS 3DEP in
           the US), and the cross section then shows the actual ground profile. The calculation still
@@ -285,6 +288,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-  <script type="module" src="js/app.js?v=23"></script>
+  <script type="module" src="js/app.js?v=24"></script>
 </body>
 </html>
