@@ -251,39 +251,49 @@
       <h3>The radius of influence in practice</h3>
       <p>R is the least certain input. When a pumping test is available, R comes from it: plot the
         drawdowns at the observation wells against the log of distance and extend the line to zero
-        drawdown. Without one, an empirical formula such as Sichardt's gives an estimate, usually
-        computed once from the drawdown the design calls for. For a group of wells, the app treats
-        the ring as one large well of radius r<sub>e</sub> = √(A/π), where A is the excavation's area, and
-        takes R = r<sub>e</sub> + 3000 s √k with s the drawdown the excavation needs. The pumping rate depends on R only
-        through ln(R/r), so a common check is to run the design for a range of R. R also grows with
-        pumping time (about 1.5√(Tt/S) by the Cooper–Jacob approximation), so a steady R stands
-        for some period of pumping. Around a compact excavation, a ring of wells behaves much like
-        one large well of radius √(A/π); that is why, for a small site, the least total rate barely
-        changes with the number of wells.</p>
+        drawdown. Without one, an empirical formula gives an estimate. For a group of wells, the
+        ring is treated as one large well of radius r<sub>e</sub> = √(A/π), where A is the
+        excavation's area, drawn down by s, the drawdown the excavation needs, and R is measured
+        from its center: R = r<sub>e</sub> + 3000 s √k (Sichardt) or r<sub>e</sub> + 575 s √(Hk)
+        (Kusakin), in meters with k in m/s. The pumping rate depends on R only through ln(R/r), so
+        a common check is to run the design for a range of R. R also grows with pumping time (about
+        1.5√(Tt/S) by the Cooper–Jacob approximation), so a steady R stands for some period of
+        pumping. Because a ring around a compact excavation acts like one large well, the least
+        total rate for a small site barely changes with the number of wells.</p>
       <h3>Steps</h3>
       <ol>
         <li>Find the site (search, or zoom and pan) and draw the excavation outline, drag a
           rectangle (Rotate turns it to match the site), or load a GeoJSON polygon.</li>
-        <li>Enter the site: the depths to the water table, to the bottom of the aquifer (the top
-          of the low-k layer), and of the excavation, and how far below the excavation bottom the
-          water must be. Or switch to elevations: the water table, the top of the low-k layer, the excavation bottom, and the required water level, with the ground elevation typed in or read from terrain. A ground elevation
-          is optional; with it, results are also given as elevations. <b>Use terrain</b> fills it
-          with the average ground elevation over the excavation, from open terrain data (USGS 3DEP in
-          the US), and the cross section then shows the actual ground profile. The ground's range under the excavation stays under the field, <b>Ground contours on the map</b> draws dashed ground contours when zoomed in to building scale, and the corner of the map shows the ground elevation under the pointer. The calculation still
-          treats the ground and the water table as level.</li>
+        <li>Enter the site, either as depths below the ground (to the water table, to the top of
+          the low-k layer, and of the excavation, plus any extra depth the water must reach below
+          the excavation bottom) or as elevations (the water table, the top of the low-k layer, the
+          excavation bottom, and the required water level). With depths, the ground elevation is
+          optional; with it, results are also given as elevations. With elevations, it is
+          required. <b>Use terrain</b> fills it with the average ground over the excavation, from
+          open terrain data (USGS 3DEP in the US), and the cross section then shows the actual
+          ground profile. The ground's range under the excavation is listed under the field,
+          <b>Ground contours on the map</b> draws dashed ground contours when zoomed in to building
+          scale, and the corner of the map shows the ground elevation under the pointer. The
+          calculation treats the ground and the water table as level. Then enter k and R: typed in,
+          or from Sichardt's or Kusakin's formula.</li>
         <li>Click to place wells, or generate a ring at an offset from the edge.</li>
-        <li>Enter a pumping rate and check the contours, or find the least rate that works.</li>
+        <li>Enter a pumping rate and check the results, or find the least rate that works.</li>
+        <li>Choose what the contours show: depth to water, water elevation (with a ground
+          elevation), drawdown, water below the required level, or head above the low-k layer. The
+          orange contour is the required level, and the area where the water is below it is shaded
+          green.</li>
         <li>Check a cross section: east–west or north–south through the excavation, or any line
-          you draw. It shows the water level against the static level and the target, with the
-          excavation and the wells on the line.</li>
-        <li>Use the design curve to choose the number of wells.</li>
+          you draw. It shows the water level against the static level and the required level, with
+          the ground, the excavation, and the wells on the line.</li>
+        <li>Use the design curves: the least total rate against the number of wells (rings at the
+          offset), or against k for the wells on the map.</li>
       </ol>
       <p class="hint">Units: lengths are in meters or feet (the switch at the top of the panel);
         k and Q each have their own unit, and every flow rate in the results, the design curve,
         and the exports is given in Q's unit. Changing a unit converts the values already entered.</p>
-      <p class="hint">The map shows head, drawdown, or head below the target as contours, and
-        shades the area where the head is below the target. Save the project to come back to
-        it; the file holds the outline, the wells, and the inputs.</p>
+      <p class="hint">Save the project to come back to it; the file holds the outline, the wells,
+        the inputs and units, and the contour choices. The app also keeps your work in this
+        browser when you reload the page.</p>
     </div>
     <footer><button data-close class="primary">Close</button></footer>
   </dialog>
