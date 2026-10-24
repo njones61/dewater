@@ -123,13 +123,29 @@
         <details class="sub" id="wall-box">
           <summary>Cutoff wall</summary>
           <label class="switch"><input id="in-wall" type="checkbox"><span>Enclose the site with a cutoff wall</span></label>
+          <div class="seg small" role="radiogroup" aria-label="Where the wall runs">
+            <label><input type="radio" name="wallsrc" value="offset" checked> Offset from the edge</label>
+            <label><input type="radio" name="wallsrc" value="drawn"> Drawn or loaded</label>
+          </div>
+          <div id="wall-drawn" hidden>
+            <div class="btn-grid">
+              <button id="btn-wall-draw" class="primary">Draw wall</button>
+              <button id="btn-wall-start">Start from the offset</button>
+              <label class="file-btn">Load GeoJSON<input id="file-wall" type="file" accept=".geojson,.json" hidden></label>
+              <button id="btn-wall-edit">Edit</button>
+              <button id="btn-wall-delete">Delete</button>
+              <button id="btn-wall-export">Download</button>
+            </div>
+            <p class="hint">The wall must enclose the excavation. <b>Start from the offset</b> copies
+              the offset outline so you can move its corners to fit the site.</p>
+          </div>
           <div class="fields two">
-            <label><span>Offset from the edge (<span class="uL">m</span>)</span><input id="in-woff" type="number" step="any" value="20"></label>
+            <label id="woff-field"><span>Offset from the edge (<span class="uL">m</span>)</span><input id="in-woff" type="number" step="any" value="20"></label>
             <label><span>Thickness, t (<span class="uL">m</span>)</span><input id="in-wthick" type="number" step="any" value="0.9"></label>
-            <label class="span2">Wall conductivity, k<sub>w</sub>
+            <label class="span2"><span>Wall conductivity, k<sub>w</sub></span>
               <span class="pair"><input id="in-kw" type="number" step="any" value="1e-7">
                 <select id="in-kw-unit"><option value="cms" selected>cm/s</option><option value="ms">m/s</option><option value="mday">m/day</option><option value="fts">ft/s</option><option value="ftday">ft/day</option></select></span></label>
-            <label>Specific yield, S<sub>y</sub><input id="in-sy" type="number" step="any" value="0.2"></label>
+            <label><span>Specific yield, S<sub>y</sub></span><input id="in-sy" type="number" step="any" value="0.2"></label>
             <label>Days to draw down<input id="in-tdrain" type="number" step="any" value="30" placeholder="blank = hold only"></label>
           </div>
           <p class="hint">The wall is keyed into the low-k layer, taken as impermeable, so water
@@ -317,8 +333,9 @@
           calculation treats the ground and the water table as level. Then enter k and R: typed in,
           or from Sichardt's or Kusakin's formula.</li>
         <li>Click to place wells, or generate a ring at an offset from the edge. To enclose the
-          site with a cutoff wall, open <b>Cutoff wall</b> and give its offset, thickness, and
-          conductivity, the aquifer's specific yield, and the days allowed to draw the water down.</li>
+          site with a cutoff wall, open <b>Cutoff wall</b>: place the wall at an offset from the
+          edge, or draw it, load it from GeoJSON, or start from the offset and move its corners
+          where the site allows; then give its thickness and conductivity, the aquifer's specific yield, and the days allowed to draw the water down.</li>
         <li>Enter a pumping rate and check the results, or find Q<sub>min</sub>.</li>
         <li>Choose what the contours show: depth to water, water elevation (with a ground
           elevation), drawdown, water below the required level, or head above the low-k layer. The
@@ -344,6 +361,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-  <script type="module" src="js/app.js?v=28"></script>
+  <script type="module" src="js/app.js?v=29"></script>
 </body>
 </html>

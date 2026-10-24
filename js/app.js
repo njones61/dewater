@@ -34,6 +34,7 @@ function fitSite() {
   let b = null;
   const add = (x) => { b = b ? b.extend(x) : L.latLngBounds(x, x); };
   if (state.excavation) { const eb = state.excavation.getBounds(); add(eb.getSouthWest()); add(eb.getNorthEast()); }
+  if (state.wall && map.hasLayer(state.wall)) { const wb = state.wall.getBounds(); add(wb.getSouthWest()); add(wb.getNorthEast()); }
   state.wells.forEach((w) => add(w.marker.getLatLng()));
   if (state.last && state.origin) {
     const [x0, x1, y0, y1] = state.last.box;
@@ -297,18 +298,25 @@ function updateExcInfo() {
     ? `Area ${fmt(a * 10.7639, 0)} ft² (${fmt(a / 4046.856, 2)} acres), perimeter ${fmt(per / 0.3048, 0)} ft.`
     : `Area ${fmt(a, 0)} m² (${fmt(a / 10000, 2)} ha), perimeter ${fmt(per, 0)} m.`;
 }
-function loadGeoJSON(gj) {
+// The first polygon in a GeoJSON object, as a ring of [lat, lng] (or null).
+function geojsonRing(gj) {
   const feats = gj.type === "FeatureCollection" ? gj.features : gj.type === "Feature" ? [gj] : [{ type: "Feature", geometry: gj }];
   const poly = feats.find((f) => f.geometry && /Polygon/.test(f.geometry.type));
-  if (!poly) { alertMsg("That file has no polygon in it."); return; }
-  let coords = poly.geometry.type === "MultiPolygon" ? poly.geometry.coordinates[0][0] : poly.geometry.coordinates[0];
-  const layer = L.polygon(coords.slice(0, -1).map(([lng, lat]) => [lat, lng]));
+  if (!poly) { alertMsg("That file has no polygon in it."); return null; }
+  const coords = poly.geometry.type === "MultiPolygon" ? poly.geometry.coordinates[0][0] : poly.geometry.coordinates[0];
+  return coords.slice(0, -1).map(([lng, lat]) => [lat, lng]);
+}
+function loadGeoJSON(gj) {
+  const ring = geojsonRing(gj);
+  if (!ring) return;
+  const layer = L.polygon(ring);
   layer.addTo(map);
   setExcavation(layer);
 }
 
 $("btn-draw").onclick = () => {
   setAddMode(false);
+  state.wallDrawing = false;
   map.pm.enableDraw("Polygon", { templineStyle: EXC_STYLE, hintlineStyle: { color: "#E8582C", dashArray: "5,5" }, pathOptions: EXC_STYLE });
   tip("Click the corners of the excavation. Click the first corner to finish.");
 };
@@ -323,6 +331,7 @@ $("btn-delete-exc").onclick = () => {
 };
 $("btn-rect").onclick = () => {
   setAddMode(false);
+  state.wallDrawing = false;
   map.pm.enableDraw("Rectangle", { pathOptions: EXC_STYLE });
   tip("Drag a box for the excavation. Use Rotate to turn it to match the site.");
 };
@@ -334,7 +343,8 @@ $("btn-rotate").onclick = () => {
 };
 map.on("pm:create", (e) => {
   tip(null);
-  if (e.shape === "Polygon" || e.shape === "Rectangle") setExcavation(e.layer, false);
+  if (e.shape === "Polygon" && state.wallDrawing) { state.wallDrawing = false; setWall(e.layer); }
+  else if (e.shape === "Polygon" || e.shape === "Rectangle") setExcavation(e.layer, false);
   else if (e.shape === "Line" && state.secDrawing) {
     state.secDrawing = false;
     const ll = e.layer.getLatLngs();
@@ -437,17 +447,90 @@ function polyArea(r) {
   for (let i = 0, j = r.length - 1; i < r.length; j = i++) a += (r[j].x + r[i].x) * (r[j].y - r[i].y);
   return Math.abs(a) / 2;
 }
-function wallGeom() {
+const wallSrc = () => document.querySelector('input[name="wallsrc"]:checked').value;
+const WALL_STYLE = { color: "#3d4550", weight: 4, opacity: 1, fillOpacity: 0 };
+// The wall's outline: the excavation's offset outward, or the wall drawn or loaded (null if
+// there is none yet).
+function offsetRingLL() {
   const f = excFeature(), off = numL("in-woff");
   const buf = off > 0 ? turf.buffer(f, off, { units: "meters", steps: 16 }) : f;
   const geom = buf.geometry.type === "MultiPolygon" ? buf.geometry.coordinates[0] : buf.geometry.coordinates;
-  const ringLL = geom[0].slice(0, -1).map(([lng, lat]) => L.latLng(lat, lng));
+  return geom[0].slice(0, -1).map(([lng, lat]) => L.latLng(lat, lng));
+}
+function wallRingLL() {
+  if (wallSrc() === "offset") return offsetRingLL();
+  if (!state.wall) return null;
+  let ll = state.wall.getLatLngs();
+  while (Array.isArray(ll[0])) ll = ll[0];
+  return ll;
+}
+function setWall(layer) {
+  if (state.wall && state.wall !== layer) map.removeLayer(state.wall);
+  state.wall = layer;
+  layer.setStyle(WALL_STYLE);
+  layer.bindTooltip("Cutoff wall", { sticky: true });
+  layer.on("pm:edit pm:dragend", () => schedule());
+  layer.on("pm:remove", () => { state.wall = null; schedule(); });
+  schedule();
+}
+function showWallSrc() {
+  const drawn = wallSrc() === "drawn";
+  $("wall-drawn").hidden = !drawn;
+  $("woff-field").hidden = drawn;
+  // the drawn wall shows only while it is the one in use
+  if (state.wall) {
+    const use = drawn && $("in-wall").checked;
+    if (use && !map.hasLayer(state.wall)) state.wall.addTo(map);
+    if (!use && map.hasLayer(state.wall)) { if (state.wall.pm.enabled()) state.wall.pm.disable(); map.removeLayer(state.wall); $("btn-wall-edit").textContent = "Edit"; }
+  }
+}
+document.querySelectorAll('input[name="wallsrc"]').forEach((r) => r.addEventListener("change", () => { showWallSrc(); schedule(); }));
+$("btn-wall-draw").onclick = () => {
+  if (!state.excavation) return alertMsg("Draw or load the excavation first.");
+  setAddMode(false);
+  state.wallDrawing = true;
+  map.pm.enableDraw("Polygon", { templineStyle: WALL_STYLE, hintlineStyle: { color: "#3d4550", dashArray: "5,5" }, pathOptions: WALL_STYLE });
+  tip("Click the corners of the wall, around the excavation. Click the first corner to finish.");
+};
+$("btn-wall-start").onclick = () => {
+  if (!state.excavation) return alertMsg("Draw or load the excavation first.");
+  const ring = offsetRingLL();
+  // the buffer's rounded corners make many vertices; keep the shape with fewer to drag
+  const line = turf.lineString([...ring, ring[0]].map((q) => [q.lng, q.lat]));
+  const simple = turf.simplify(line, { tolerance: 0.5 / M_LAT * 4, highQuality: true }).geometry.coordinates.slice(0, -1);
+  setWall(L.polygon(simple.map(([lng, lat]) => [lat, lng])).addTo(map));
+  state.wall.pm.enable({ allowSelfIntersection: false }); $("btn-wall-edit").textContent = "Done editing";
+  tip("Drag the corners to move the wall where the site allows.");
+};
+$("btn-wall-edit").onclick = () => {
+  if (!state.wall) return;
+  const on = state.wall.pm.enabled();
+  if (on) { state.wall.pm.disable(); $("btn-wall-edit").textContent = "Edit"; tip(null); }
+  else { state.wall.pm.enable({ allowSelfIntersection: false }); $("btn-wall-edit").textContent = "Done editing"; tip("Drag the corners to reshape the wall."); }
+};
+$("btn-wall-delete").onclick = () => {
+  if (!state.wall) return;
+  if (state.wall.pm.enabled()) state.wall.pm.disable();
+  map.removeLayer(state.wall); state.wall = null;
+  $("btn-wall-edit").textContent = "Edit"; tip(null);
+  schedule();
+};
+$("file-wall").onchange = (e) => readFile(e.target.files[0], (t) => { const r = geojsonRing(JSON.parse(t)); if (r) setWall(L.polygon(r).addTo(map)); });
+$("btn-wall-export").onclick = () => {
+  const r = wallRingLL();
+  if (!r) return;
+  const c = r.map((q) => [q.lng, q.lat]); c.push(c[0]);
+  download("cutoff_wall.geojson", JSON.stringify(turf.featureCollection([turf.polygon([c])])), "application/geo+json");
+};
+function wallGeom() {
+  const ringLL = wallRingLL();
+  if (!ringLL || ringLL.length < 3) return null;
   const ring = ringLL.map(toXY);
   let P = 0;
   ring.forEach((q, i) => { const r2 = ring[(i + 1) % ring.length]; P += Math.hypot(r2.x - q.x, r2.y - q.y); });
   return { ringLL, ring, P, Aw: polyArea(ring) };
 }
-$("in-wall").addEventListener("change", () => { if ($("in-wall").checked) $("wall-box").open = true; schedule(); });
+$("in-wall").addEventListener("change", () => { if ($("in-wall").checked) $("wall-box").open = true; showWallSrc(); schedule(); });
 
 // ------------------------------------------------------------------ analysis
 let timer = null;
@@ -561,9 +644,13 @@ function run() {
 // map and the section show that state. Outside, the leakage is drawn in along the wall: sinks
 // spaced along it, superposed as for wells.
 function runWall(p, ring, wells) {
-  const g = wallGeom(), wp = wallParams(), w = { P: g.P, Aw: g.Aw, t: wp.t, kw: wp.kw, Sy: wp.Sy };
+  const g = wallGeom(), wp = wallParams();
+  if (!g) return setStatus("idle", "Draw or load the cutoff wall, or place it at an offset from the edge.");
   L.polygon(g.ringLL, { color: "#ffffff", weight: 8, opacity: 0.9, fill: false, interactive: false }).addTo(wallLayer);
-  L.polygon(g.ringLL, { color: "#3d4550", weight: 4, opacity: 1, fill: false }).bindTooltip("Cutoff wall", { sticky: true }).addTo(wallLayer);
+  if (wallSrc() === "offset") L.polygon(g.ringLL, { ...WALL_STYLE, fill: false }).bindTooltip("Cutoff wall", { sticky: true }).addTo(wallLayer);
+  else if (state.wall) state.wall.bringToFront();
+  if (!ring.every((q) => inside(q, g.ring)) || g.ring.some((q) => inside(q, ring))) return setStatus("bad", "The cutoff wall must enclose the excavation.");
+  const w = { P: g.P, Aw: g.Aw, t: wp.t, kw: wp.kw, Sy: wp.Sy };
   const leakT = wallLeak(p.target, p, w);
   const hHold = Math.max(wallSteady(p.Q, p, w), p.target);
   const leak = wallLeak(hHold, p, w), hOut = wallOutside(hHold, p, w);
@@ -1122,6 +1209,7 @@ $("btn-optimize").onclick = () => {
   const ring = excRing();
   if (ring && wallOn()) {
     const g = wallGeom(), wp = wallParams();
+    if (!g) return setStatus("idle", "Draw or load the cutoff wall first.");
     const Q = wallQmin(p, { P: g.P, Aw: g.Aw, t: wp.t, kw: wp.kw, Sy: wp.Sy }, p.target, wp.T);
     const qv = Q / Qf(), mag = 10 ** (Math.floor(Math.log10(qv)) - 5);
     $("in-Q").value = trim(Math.ceil(qv / mag) * mag);
@@ -1166,7 +1254,9 @@ $("btn-curve").onclick = () => {
     if (curveVar === "n") return alertMsg("With a cutoff wall, Q\u2098\u1d62\u2099 doesn't depend on the number of wells. Try Q\u2098\u1d62\u2099 against k.");
     const ku = K_UNITS[$("in-k-unit").value], k0 = num("in-kmin") * ku, k1 = num("in-kmax") * ku;
     if (!(k0 > 0 && k1 > k0)) return alertMsg("Enter a range of k, smallest first.");
-    const g = wallGeom(), wp = wallParams(), w = { P: g.P, Aw: g.Aw, t: wp.t, kw: wp.kw, Sy: wp.Sy };
+    const g = wallGeom(), wp = wallParams();
+    if (!g) return alertMsg("Draw or load the cutoff wall first.");
+    const w = { P: g.P, Aw: g.Aw, t: wp.t, kw: wp.kw, Sy: wp.Sy };
     const Rfix = state.last ? state.last.p.R : p.R;
     state.curveRfix = Rfix; state.curveWall = true;
     for (let i = 0; i <= 30; i++) {
@@ -1285,6 +1375,8 @@ function project() {
     terrain: state.terrain,
     groundContours: $("in-gcont").checked,
     wall: $("in-wall").checked,
+    wallSrc: wallSrc(),
+    wallRing: state.wall ? (() => { let ll = state.wall.getLatLngs(); while (Array.isArray(ll[0])) ll = ll[0]; return ll.map((q) => [q.lat, q.lng]); })() : null,
     view: { center: map.getCenter(), zoom: map.getZoom() },
     section: state.section ? state.section.map((q) => [q.lat, q.lng]) : null,
   };
@@ -1299,6 +1391,11 @@ function restore(pr, fit = true) {
   Object.entries(pr.inputs || {}).forEach(([id, v]) => { if ($(id)) $(id).value = (legacy[id] && legacy[id][v]) || v; });
   ["in-k-unit", "in-Q-unit", "in-kw-unit"].forEach((id) => ($(id).dataset.prev = $(id).value));
   $("in-wall").checked = !!pr.wall;
+  const ws = document.querySelector(`input[name="wallsrc"][value="${pr.wallSrc || "offset"}"]`);
+  if (ws) ws.checked = true;
+  if (state.wall) { map.removeLayer(state.wall); state.wall = null; }
+  if (pr.wallRing) setWall(L.polygon(pr.wallRing));
+  showWallSrc();
   // projects saved with heads above the low-k layer (H and the target head, with a ground height
   // in later versions) open as elevations with the datum at the low-k layer
   let md = pr.mode || "head";
