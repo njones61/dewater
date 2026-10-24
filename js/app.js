@@ -78,7 +78,7 @@ const Qf = () => Q_UNITS[$("in-Q-unit").value];
 const Qn = () => $("in-Q-unit").selectedOptions[0].textContent;
 const numL = (id) => num(id) * Lf();                              // a length input, in meters
 const fmtL = (v, d) => `${fmt(v / Lf(), d)} ${Ln()}`;
-const LEN_INPUTS = ["in-sw", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-H", "in-target", "in-R", "in-rw", "in-offset", "in-interval"];
+const LEN_INPUTS = ["in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-H", "in-target", "in-R", "in-rw", "in-offset", "in-interval"];
 const trim = (v) => String(+v.toPrecision(6));
 
 function setLenLabels() { document.querySelectorAll(".uL").forEach((e) => (e.textContent = Ln())); }
@@ -145,48 +145,36 @@ function params() {
   return p;
 }
 // The radius of influence from the empirical formulas (Bear 1979, p. 306), in meters with k in
-// m/s and s the drawdown at the wells, s_w: entered, or by default 1.25 times the drawdown the
-// excavation needs (H minus the target head). It is a design estimate, one number, so R is too.
-// (Solving s_w and R together from the computed drawdown has several consistent answers, from
-// wells that barely interact to wells pumped dry, so the formula is used as it is in practice.)
-const swDefault = (p) => 1.25 * (p.H - p.target);
-const swField = (p) => (numL("in-sw") > 0 ? numL("in-sw") : swDefault(p));
-function radius(p, k, s = swField(p)) {
-  if (p.Rmethod === "sichardt") return 3000 * s * Math.sqrt(k);
-  if (p.Rmethod === "kusakin") return 575 * s * Math.sqrt(p.H * k);
+// m/s. A ring of wells around an excavation is treated as one large well of the excavation's
+// equivalent radius, r_e = √(A/π), drawn down by s, the drawdown the excavation needs (H minus
+// the target head); R is measured from its center: R = r_e + 3000 s √k (Sichardt) or
+// r_e + 575 s √(Hk) (Kusakin). R then depends on the site and k, never on how many wells share
+// the pumping.
+function excArea() {
+  const ring = excRing();
+  if (!ring || !state.origin) return 0;
+  const r = ring.map(toXY);
+  let a = 0;
+  for (let i = 0, j = r.length - 1; i < r.length; j = i++) a += (r[j].x + r[i].x) * (r[j].y - r[i].y);
+  return Math.abs(a) / 2;
+}
+const rEquiv = () => Math.sqrt(excArea() / Math.PI);
+function radius(p, k) {
+  const s = p.H - p.target;
+  if (p.Rmethod === "sichardt") return rEquiv() + 3000 * s * Math.sqrt(k);
+  if (p.Rmethod === "kusakin") return rEquiv() + 575 * s * Math.sqrt(p.H * k);
   return p.R;
 }
-// The average drawdown at the wells (at their radius r_w) for equal rates qEach.
-function wellDrawdown(p, wells, qEach) {
-  const { h } = heads(wells.map((w) => ({ x: w.x + p.rw, y: w.y })), wells.map((w) => ({ ...w, q: qEach })), p);
-  return p.H - h.reduce((a, b) => a + b, 0) / h.length;
-}
-// The least rate with R from a formula: assume s_w, get R, find the least rate, read the
-// drawdown it makes at the wells, and repeat with that drawdown until the two agree. Because each
-// round meets the target exactly, this settles (in a few rounds, half-steps to damp the swing).
-// With R entered there is nothing to solve.
+// The least rate, with R for the given k.
 function optimalWithR(cp, wells, p, k = p.k) {
-  if (p.Rmethod === "entered") return { ...optimalRate(cp, wells, { ...p, k }, p.target), R: p.R, sw: null, rounds: 0 };
-  let sw = swField(p), o = null, R = null, rounds = 0;
-  for (; rounds < 100; rounds++) {
-    R = radius(p, k, sw);
-    if (!(R > p.rw)) break;
-    o = optimalRate(cp, wells, { ...p, k, R }, p.target);
-    const sn = isFinite(o.qEach) ? Math.min(p.H, wellDrawdown({ ...p, k, R }, wells, o.qEach)) : p.H;
-    if (Math.abs(sn - sw) < 1e-4 * p.H) { sw = sn; break; }
-    sw = 0.5 * sw + 0.5 * sn;
-  }
-  R = radius(p, k, sw);
-  o = optimalRate(cp, wells, { ...p, k, R }, p.target);
-  return { ...o, R, sw, rounds: rounds + 1 };
+  const R = radius(p, k);
+  return { ...optimalRate(cp, wells, { ...p, k, R }, p.target), R };
 }
 function showR() {
   const p = params(), auto = p.Rmethod !== "entered";
   $("in-R").readOnly = auto;
   $("R-note").hidden = !auto;
   if (auto && Number.isFinite(p.R)) $("in-R").value = trim(p.R / Lf());
-  $("sw-field").hidden = !auto;
-  if (Number.isFinite(p.H - p.target)) $("in-sw").placeholder = `${trim(swDefault(p) / Lf())} (1.25 × needed)`;
 }
 $("in-R-method").addEventListener("change", () => { showR(); schedule(); });
 
@@ -467,9 +455,8 @@ function run() {
     rows.push(["Margin (target − highest)", fmtL(p.target - hmax, 2)]);
   }
   if (p.Rmethod !== "entered") {
-    const sw = numL("in-sw") > 0 ? numL("in-sw") : swDefault(p);
+    rows.push(["Equivalent radius, √(A/π)", fmtL(rEquiv(), 1)]);
     rows.push(["R from the formula", fmtL(p.R, 0)]);
-    rows.push(["Drawdown at the wells: assumed / computed", `${fmt(sw / Lf(), 2)} / ${fmtL(p.H - hw.reduce((a, b) => a + b, 0) / hw.length, 2)}`]);
   }
   rows.push(st ? ["Deepest water, at a well", `${fmtL(st.dbase - Math.min(...hw), 2)} below ground`] : ["Lowest head at a well", fmtL(Math.min(...hw), 2)]);
   $("results").innerHTML = rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("");
@@ -645,7 +632,7 @@ buildRampPicker();
 
 ["in-field", "in-interval", "in-fill", "in-dewatered", "in-ramp", "in-ramp-rev"].forEach((id) => $(id).addEventListener("change", () => { drawResults(); persist(); }));
 $("in-opacity").addEventListener("input", () => fill.setOpacity(parseFloat($("in-opacity").value)));
-["in-sw", "in-k", "in-k-unit", "in-H", "in-R", "in-target", "in-rw", "in-Q", "in-Q-unit", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev"]
+["in-k", "in-k-unit", "in-H", "in-R", "in-target", "in-rw", "in-Q", "in-Q-unit", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev"]
   .forEach((id) => $(id).addEventListener("input", () => { updateDerived(); schedule(250); }));
 
 // ------------------------------------------------------------------ terrain
@@ -901,10 +888,7 @@ $("btn-optimize").onclick = () => {
   const r = ring.map(toXY), wells = state.wells.map((w) => toXY(w.marker.getLatLng()));
   const opt = optimalWithR(checkPoints(r), wells, p);
   if (!opt || !isFinite(opt.Q)) return setStatus("bad", "No pumping rate works with these wells.");
-  // with R from a formula, the solved drawdown at the wells goes into the s_w field, so the
-  // rate below is checked with the R it was found with
-  if (opt.sw !== null) $("in-sw").value = trim(opt.sw / Lf());
-  state.optNote = opt.sw !== null ? ` R and s_w solved together (${opt.rounds} rounds): R = ${fmtL(opt.R, 0)}, s_w = ${fmtL(opt.sw, 2)}.` : "";
+  state.optNote = "";
   // rounded up at six figures, so the entered rate still meets the target
   const qv = opt.Q / Qf(), mag = 10 ** (Math.floor(Math.log10(qv)) - 5);
   $("in-Q").value = trim(Math.ceil(qv / mag) * mag);
@@ -1027,7 +1011,7 @@ $("btn-export-contours").onclick = () => {
   download("contours.geojson", JSON.stringify(fc), "application/geo+json");
 };
 
-const INPUTS = ["in-sw", "in-R-method", "in-curve-var", "in-kmin", "in-kmax", "in-k", "in-k-unit", "in-H", "in-R", "in-target", "in-rw", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-Q", "in-Q-unit", "in-offset", "in-nwells", "in-field", "in-interval", "in-nmin", "in-nmax", "in-ramp"];
+const INPUTS = ["in-R-method", "in-curve-var", "in-kmin", "in-kmax", "in-k", "in-k-unit", "in-H", "in-R", "in-target", "in-rw", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-Q", "in-Q-unit", "in-offset", "in-nwells", "in-field", "in-interval", "in-nmin", "in-nmax", "in-ramp"];
 function project() {
   const f = excFeature();
   return {

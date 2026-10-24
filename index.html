@@ -82,15 +82,14 @@
           <label class="span2">Radius of influence, R
             <select id="in-R-method">
               <option value="entered" selected>Entered</option>
-              <option value="sichardt">Sichardt: R = 3000 s √k</option>
-              <option value="kusakin">Kusakin: R = 575 s √(Hk)</option>
+              <option value="sichardt">Sichardt: R = rₑ + 3000 s √k</option>
+              <option value="kusakin">Kusakin: R = rₑ + 575 s √(Hk)</option>
             </select></label>
-          <label class="span2" id="sw-field" hidden><span>Drawdown at the wells, s<sub>w</sub> (<span class="uL">m</span>)</span><input id="in-sw" type="number" step="any"></label>
           <label><span>R (<span class="uL">m</span>)</span><input id="in-R" type="number" step="any" value="500"></label>
           <label><span>Well radius, r<sub>w</sub> (<span class="uL">m</span>)</span><input id="in-rw" type="number" step="any" value="0.15"></label>
-          <p class="hint span2" id="R-note" hidden>Empirical, in meters with k in m/s, from the drawdown at the wells, s<sub>w</sub>
-            (blank: 1.25 times the drawdown the excavation needs). <b>Find the least Q</b> and the design
-            curves solve R and s<sub>w</sub> together; a rate you type in uses the s<sub>w</sub> here. Bear (1979), p. 306.</p>
+          <p class="hint span2" id="R-note" hidden>Empirical, in meters with k in m/s (Bear 1979, p. 306). The
+            wells are treated as one large well of the excavation's equivalent radius, r<sub>e</sub> = √(A/π),
+            drawn down by s, the drawdown the excavation needs; R is measured from its center.</p>
         </div>
         <p class="hint">The aquifer sits on a low-permeability layer, and the ground and the water
           table start out level. The water must come down to the excavation bottom, plus any extra
@@ -246,7 +245,9 @@
       <p>R is the least certain input. When a pumping test is available, R comes from it: plot the
         drawdowns at the observation wells against the log of distance and extend the line to zero
         drawdown. Without one, an empirical formula such as Sichardt's gives an estimate, usually
-        computed once from the drawdown the design calls for. The pumping rate depends on R only
+        computed once from the drawdown the design calls for. For a group of wells, the app treats
+        the ring as one large well of radius r<sub>e</sub> = √(A/π), where A is the excavation's area, and
+        takes R = r<sub>e</sub> + 3000 s √k with s the drawdown the excavation needs. The pumping rate depends on R only
         through ln(R/r), so a common check is to run the design for a range of R. R also grows with
         pumping time (about 1.5√(Tt/S) by the Cooper–Jacob approximation), so a steady R stands
         for some period of pumping. Around a compact excavation, a ring of wells behaves much like
@@ -284,6 +285,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-  <script type="module" src="js/app.js?v=22"></script>
+  <script type="module" src="js/app.js?v=23"></script>
 </body>
 </html>
