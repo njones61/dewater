@@ -666,7 +666,7 @@ function run() {
   hw.forEach((v, i) => { state.wells[i].marker.setIcon(wellIcon(v <= 0)); if (v <= 0) dryWells.push(i); });
 
   state.last = { p, box, nx, ny, h, ring, wells, hmax, at, hw, qEach,
-    hRange: p.t !== undefined ? spanRange(["w", p.Q, p.k, p.H, p.Sy, p.rw, wells, box, tEnd()], () => heads(G, W, { ...p, t: tEnd() }).h) : null };
+    hRange: p.t !== undefined ? spanRange(["w", p.Q, p.k, p.H, p.Sy, p.rw, wells, box, tDesign()], () => heads(G, W, { ...p, t: tDesign() }).h) : null };
   drawResults();
   drawSection();
   showAnim();
@@ -723,12 +723,15 @@ function run() {
   }
 }
 
-// In transient flow the contours and colors keep one scale through time: from the static level
-// down to the lowest water at the end of the time bar's span (kept while the bar plays).
+// In transient flow the colors keep one scale through time: from the static level down to the
+// water on the design day (kept while the bar plays). After the design day the water keeps
+// falling: deeper water takes the end color, and the contours go on at the same interval.
+const tDesign = () => num("in-tdays") * 86400;
 let rangeMemo = { key: null, r: null };
-function spanRange(keyParts, hEnd) {
+function spanRange(keyParts, hEnd, hIn = Infinity) {
   const key = JSON.stringify(keyParts);
-  if (rangeMemo.key !== key) { const h = hEnd(); let lo = Infinity; for (const v of h) lo = Math.min(lo, v); rangeMemo = { key, r: [lo, keyParts[3]] }; }
+  // the 2nd percentile: a few points beside wells pumped dry don't wash out the scale
+  if (rangeMemo.key !== key) { const h = Float64Array.from(hEnd()).sort(); rangeMemo = { key, r: [Math.min(h[Math.floor(0.02 * (h.length - 1))], hIn), keyParts[3]] }; }
   return rangeMemo.r;
 }
 
@@ -767,11 +770,14 @@ function runWall(p, ring, wells) {
   const h = headAt(grid(box, nx, ny));
   const n = wells.length, qEach = n ? p.Q / n : 0, hw = wells.map(() => hHold);
   state.wells.forEach((wl) => wl.marker.setIcon(wellIcon(false)));
-  const hRange = tr ? spanRange(["wall", p.Q, p.k, p.H, p.Sy, p.rw, g.ring, w, box, tEnd()], () => {
-    const pe = { ...p, t: tEnd() }, le = wallLeak(Math.max(wallSteady(p.Q, pe, w), p.target), pe, w);
-    const he = heads(grid(box, nx, ny), sinks.map((q) => ({ ...q, q: le / sinks.length })), { ...pOut, t: pe.t }).h;
-    return [...he, p.target];
-  }) : null;
+  const hRange = tr ? spanRange(["wall", p.Q, p.k, p.H, p.Sy, p.rw, g.ring, w, box, tDesign()], () => {
+    const pe = { ...p, t: tDesign() }, le = wallLeak(Math.max(wallSteady(p.Q, pe, w), p.target), pe, w);
+    return heads(grid(box, nx, ny), sinks.map((q) => ({ ...q, q: le / sinks.length })), { ...pOut, t: pe.t }).h;
+  }, (() => {
+    // the water inside the wall on the design day
+    const pe = { ...p, t: tDesign() };
+    return wallDrainTime(p.Q, pe, w, p.target) > pe.t ? wallLevelAt(p.Q, pe, w, pe.t) : Math.max(wallSteady(p.Q, pe, w), p.target);
+  })()) : null;
   state.last = { p, box, nx, ny, h, ring, wells, hmax: hHold, at: null, hw, qEach, headAt, hRange, wall: { ...g, w, hHold, leak, hOut } };
   drawResults();
   drawSection();
@@ -851,18 +857,22 @@ function drawResults() {
   const { box, nx, ny, p } = last;
   const { v, title, tgt, drier } = fieldValues(last);
   let lo = d3.min(v), hi = d3.max(v);
+  let lv = niceLevels(lo, hi);
   if (last.hRange) {
-    const e = fieldValues({ ...last, h: Float64Array.from(last.hRange) }).v;
-    lo = Math.min(lo, e[0], e[1]); hi = Math.max(hi, e[0], e[1]);
+    const e = fieldValues({ ...last, h: Float64Array.from(last.hRange) }).v, vlo = lo, vhi = hi;
+    lo = Math.min(e[0], e[1]); hi = Math.max(e[0], e[1]);
+    // the design day's interval, over whatever range the water spans now
+    const base = niceLevels(lo, hi), iv = base.length > 1 ? base[1] - base[0] : 0;
+    lv = iv > 0 ? d3.range(Math.ceil(vlo / iv) * iv, vhi + iv * 1e-6, iv).map((t) => +t.toFixed(10)) : base;
   }
   if (!(hi > lo)) return;
   // the required level always gets its own contour
-  const levels = [...new Set([...niceLevels(lo, hi), ...(tgt > lo && tgt < hi ? [tgt] : [])])].sort((a, b) => a - b);
+  const levels = [...new Set([...lv, ...(tgt > Math.min(lo, d3.min(v)) && tgt < Math.max(hi, d3.max(v)) ? [tgt] : [])])].sort((a, b) => a - b);
   // low head (deep drawdown) dark
   // drier (deeper water) at the dark end of the ramp; Reverse flips it
   const ramp = d3[`interpolate${$("in-ramp").value}`] || d3.interpolateYlGnBu;
   const flip = $("in-ramp-rev").checked !== ["Spectral", "RdYlBu"].includes($("in-ramp").value);
-  const color = d3.scaleSequential(ramp).domain((drier !== flip) ? [lo, hi] : [hi, lo]);
+  const color = d3.scaleSequential(ramp).domain((drier !== flip) ? [lo, hi] : [hi, lo]).clamp(true);
   const op = parseFloat($("in-opacity").value);
 
   // color fill: a raster over the analysis box
