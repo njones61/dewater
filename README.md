@@ -9,10 +9,10 @@ Design a dewatering well system for an excavation in an unconfined aquifer, in t
 2. Enter the site as depths below ground (water table, bottom of the aquifer, excavation, and the
    extra depth the water must reach below its bottom), or as H and the target head; then k and R.
 3. Click to place wells, or generate a ring of wells at an offset from the edge.
-4. Enter a total pumping rate and check the contours, or find the least rate that dewaters the
-   excavation.
+4. Enter a total pumping rate and check the contours, or find the minimum design pumping rate,
+   Q_min: the smallest total rate that dewaters the excavation.
 5. Check cross sections of the water level: east–west, north–south, or along any line you draw.
-6. Compute the design curve, the least total rate against the number of wells, to choose how many
+6. Compute the design curve, Q_min against the number of wells, to choose how many
    wells to use.
 
 The ground elevation can be read from open terrain data (AWS Terrain Tiles; USGS 3DEP in the
@@ -32,8 +32,8 @@ Dupuit assumptions. The wells add in H² − h²:
 
     h = √( H² − Σ (qᵢ / πk) ln(R / rᵢ) )
 
-With the total rate Q shared equally by n wells, the least Q that brings every point in the
-excavation down to the target head is exact: Q = n (H² − h_target²) / min A, where
+With the total rate Q shared equally by n wells, the minimum design pumping rate that brings every point in the
+excavation down to the target head is exact: Q_min = n (H² − h_target²) / min A, where
 A = Σ ln(R/rᵢ)/(πk) at each checked point. Points are checked on a grid over the excavation and
 along its edge. A design fails if that rate would pump a well dry. See *How it works* in the app.
 

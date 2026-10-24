@@ -170,7 +170,7 @@ function radius(p, k) {
   if (p.Rmethod === "kusakin") return rEquiv() + 575 * s * Math.sqrt(p.H * k);
   return p.R;
 }
-// The least rate, with R for the given k.
+// The minimum design pumping rate, with R for the given k.
 function optimalWithR(cp, wells, p, k = p.k) {
   const R = radius(p, k);
   return { ...optimalRate(cp, wells, { ...p, k, R }, p.target), R };
@@ -510,8 +510,8 @@ function run() {
   } else if (!ring) {
     setStatus("idle", "Draw or load the excavation to check the design.");
   } else if (state.optQ && Math.abs(p.Q - state.optQ) <= 1e-5 * state.optQ && Math.abs(hmax - p.target) < 1e-3) {
-    // still the least rate found (in whatever units it is now shown)
-    setStatus("ok", `Least Q: ${fmtQ(state.optQ)}. The highest water in the excavation is exactly at the required level.${state.optNote || ""}`);
+    // still the minimum design pumping rate found (in whatever units it is now shown)
+    setStatus("ok", `Minimum design pumping rate: ${fmtQ(state.optQ)}. The highest water in the excavation is exactly at the required level.${state.optNote || ""}`);
   } else if (hmax <= p.target) {
     setStatus("ok", st ? `Dewatered: the water is at least ${fmtL(st.dbase - hmax - st.dexc, 2)} below the excavation bottom everywhere inside it.`
       : `Dewatered: the water is at or below the target head everywhere in the excavation.`);
@@ -1021,12 +1021,12 @@ window.addEventListener("resize", () => drawSection());
   try { const h = localStorage.getItem("dewater:secH"); if (h) pane.style.height = h; } catch (_) { /* storage unavailable */ }
 }
 
-// ------------------------------------------------------------------ least Q
+// ------------------------------------------------------------------ minimum design pumping rate
 $("btn-optimize").onclick = () => {
   const p = params(), err = checkParams({ ...p, Q: 0 });
   if (err) return setStatus("bad", err);
   const ring = excRing();
-  if (!ring || !state.wells.length) return setStatus("idle", "The least Q needs an excavation and wells.");
+  if (!ring || !state.wells.length) return setStatus("idle", "Finding Q\u2098\u1d62\u2099 needs an excavation and wells.");
   const r = ring.map(toXY), wells = state.wells.map((w) => toXY(w.marker.getLatLng()));
   const opt = optimalWithR(checkPoints(r), wells, p);
   if (!opt || !isFinite(opt.Q)) return setStatus("bad", "No pumping rate works with these wells.");
@@ -1036,11 +1036,11 @@ $("btn-optimize").onclick = () => {
   $("in-Q").value = trim(Math.ceil(qv / mag) * mag);
   state.optQ = opt.feasible ? opt.Q : null;
   run();
-  if (!opt.feasible) setStatus("bad", "The least rate that dewaters the excavation would pump a well dry. Add wells, or move them farther out.");
+  if (!opt.feasible) setStatus("bad", "The minimum design pumping rate would pump a well dry. Add wells, or move them farther out.");
 };
 
 // ------------------------------------------------------------------ design curves
-// Least total Q against the number of wells (rings at the offset), or against k for the wells on
+// Q_min against the number of wells (rings at the offset), or against k for the wells on
 // the map. With R entered, Q is exactly proportional to k; with R from Sichardt or Kusakin, R
 // grows with √k and Q grows more slowly. The k curve shows both, so the role of R is plain.
 let curveRows = [], curveVar = "n";
@@ -1121,17 +1121,17 @@ function drawCurve() {
     });
   }
   svg.append("text").attr("class", "axis-title").attr("x", (m.l + W - m.r) / 2).attr("y", H - 8).attr("text-anchor", "middle").text(byK ? `Hydraulic conductivity, k (${kUnitLabel()})` : "Number of wells, n");
-  svg.append("text").attr("class", "axis-title").attr("transform", `translate(16,${(m.t + H - m.b) / 2}) rotate(-90)`).attr("text-anchor", "middle").text(`Least total Q (${unit})`);
-  $("curve-title").textContent = `Design curve: least total Q against ${byK ? "hydraulic conductivity" : "number of wells"}`;
+  svg.append("text").attr("class", "axis-title").attr("transform", `translate(16,${(m.t + H - m.b) / 2}) rotate(-90)`).attr("text-anchor", "middle").call((t) => { t.append("tspan").text("Q"); t.append("tspan").attr("baseline-shift", "sub").attr("font-size", "75%").text("min"); t.append("tspan").text(` (${unit})`); });
+  $("curve-title").innerHTML = `Design curve: Q<sub>min</sub> vs. ${byK ? "hydraulic conductivity" : "number of wells"}`;
   const bad = curveRows.filter((r) => !r.feasible).map((r) => (byK ? fmtNum(xv(r)) : r.x));
-  $("curve-note").textContent = (byK ? `The ${state.wells.length} wells on the map, equal rates.${auto ? "" : " R is entered, so Q is proportional to k."}` : `Rings at ${$("in-offset").value} ${Ln()} from the edge, equal rates.`)
-    + (bad.length ? ` Red points: the least rate would pump a well dry (${byK ? `${bad.length} of ${curveRows.length} values of k, from ${bad[0]} to ${bad[bad.length - 1]} ${kUnitLabel()}` : `n = ${bad.join(", ")}`}).` : "");
+  $("curve-note").innerHTML = (byK ? `The ${state.wells.length} wells on the map, equal rates.${auto ? "" : " R is entered, so Q is proportional to k."}` : `Rings at ${$("in-offset").value} ${Ln()} from the edge, equal rates.`)
+    + (bad.length ? ` Red points: Q<sub>min</sub> would pump a well dry (${byK ? `${bad.length} of ${curveRows.length} values of k, from ${bad[0]} to ${bad[bad.length - 1]} ${kUnitLabel()}` : `n = ${bad.join(", ")}`}).` : "");
 }
 $("btn-curve-csv").onclick = () => {
   const u = Qn().replace("³", "3").replace("/", "_per_"), ku = K_UNITS[$("in-k-unit").value], kn = kUnitLabel().replace("/", "_per_");
   const csv = curveVar === "k"
-    ? `k_${kn},R_${Ln()},total_Q_${u},total_Q_R_fixed_${u},feasible\n` + curveRows.map((r) => `${trim(r.x / ku)},${trim(r.R / Lf())},${trim(r.Q / Qf())},${trim(r.Qfixed / Qf())},${r.feasible}`).join("\n")
-    : `wells,total_Q_${u},q_per_well_${u},feasible\n` + curveRows.map((r) => `${r.x},${trim(r.Q / Qf())},${trim(r.qEach / Qf())},${r.feasible}`).join("\n");
+    ? `k_${kn},R_${Ln()},Q_min_${u},Q_min_R_fixed_${u},feasible\n` + curveRows.map((r) => `${trim(r.x / ku)},${trim(r.R / Lf())},${trim(r.Q / Qf())},${trim(r.Qfixed / Qf())},${r.feasible}`).join("\n")
+    : `wells,Q_min_${u},q_per_well_${u},feasible\n` + curveRows.map((r) => `${r.x},${trim(r.Q / Qf())},${trim(r.qEach / Qf())},${r.feasible}`).join("\n");
   download("design_curve.csv", csv, "text/csv");
 };
 

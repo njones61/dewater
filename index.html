@@ -131,7 +131,7 @@
               <select id="in-Q-unit"><option value="m3s" selected>m³/s</option><option value="m3day">m³/day</option><option value="lps">L/s</option><option value="gpm">gpm</option><option value="cfs">ft³/s</option><option value="ft3day">ft³/day</option><option value="mgd">MGD</option></select></span></label>
         </div>
         <p class="hint">Shared equally by the wells. Every flow rate in the results is given in this unit.</p>
-        <div class="row"><button id="btn-optimize" class="primary">Find the least Q that works</button></div>
+        <div class="row"><button id="btn-optimize" class="primary">Find Q<sub>min</sub></button></div>
         <div id="status" class="status idle">Draw an excavation and add wells.</div>
         <dl class="results" id="results"></dl>
       </section>
@@ -177,7 +177,7 @@
       <!-- 6. Design curves -->
       <section class="step" id="step-curve">
         <h2><span class="num">7</span>Design curves</h2>
-        <label class="fieldlike">Least total Q against
+        <label class="fieldlike"><span>Q<sub>min</sub> against</span>
           <select id="in-curve-var"><option value="n" selected>Number of wells (rings at the offset above)</option><option value="k">Hydraulic conductivity, k (these wells)</option></select></label>
         <div class="fields two" id="curve-n">
           <label>From n<input id="in-nmin" type="number" step="1" min="3" value="4"></label>
@@ -219,7 +219,7 @@
   </main>
 
   <dialog id="dlg-curve" class="dlg">
-    <header><h2 id="curve-title">Design curve: least total Q against number of wells</h2><button class="close" data-close>×</button></header>
+    <header><h2 id="curve-title">Design curve: Q<sub>min</sub> vs. number of wells</h2><button class="close" data-close>×</button></header>
     <div id="curve-chart"></div>
     <p class="hint" id="curve-note"></p>
     <footer><button id="btn-curve-png">Download PNG</button><button id="btn-curve-csv">Download CSV</button><button data-close class="primary">Close</button></footer>
@@ -239,15 +239,17 @@
       <p>H is the initial saturated thickness, k the hydraulic conductivity, R the radius of
         influence, and r<sub>i</sub> the distance from well i. A well has no effect beyond R, and
         the head at a well is taken at its radius r<sub>w</sub>.</p>
-      <h3>The least pumping rate</h3>
-      <p>With the total rate Q shared equally by n wells, the head at each point inside the
-        excavation is h = √(H² − (Q/n)·A), where A = Σ ln(R/r<sub>i</sub>)/(πk) depends only on
-        where the wells are. The highest head is at the point with the least A, so the least Q
-        that brings every point down to the target head is exact:</p>
-      <p class="eq">Q = n (H² − h<sub>target</sub>²) / min A</p>
+      <h3>The minimum design pumping rate</h3>
+      <p>The minimum design pumping rate, Q<sub>min</sub>, is the smallest total rate that brings
+        the water down to the required level everywhere inside the excavation. With the total rate
+        Q shared equally by n wells, the head at each point inside the excavation is
+        h = √(H² − (Q/n)·A), where A = Σ ln(R/r<sub>i</sub>)/(πk) depends only on where the wells
+        are. The highest head is at the point with the smallest A, so Q<sub>min</sub> is exact:</p>
+      <p class="eq">Q<sub>min</sub> = n (H² − h<sub>target</sub>²) / min A</p>
       <p>Points are checked on a grid over the excavation and along its edge, where the water is
-        usually highest. A design fails if that Q would pump a well dry (the head at its radius
-        drops to zero): add wells or move them out.</p>
+        usually highest. A design fails if Q<sub>min</sub> would pump a well dry (the head at its
+        radius drops to zero): add wells or move them out. The rate actually specified is usually
+        Q<sub>min</sub> plus a margin.</p>
       <h3>The radius of influence in practice</h3>
       <p>R is the least certain input. When a pumping test is available, R comes from it: plot the
         drawdowns at the observation wells against the log of distance and extend the line to zero
@@ -258,8 +260,8 @@
         (Kusakin), in meters with k in m/s. The pumping rate depends on R only through ln(R/r), so
         a common check is to run the design for a range of R. R also grows with pumping time (about
         1.5√(Tt/S) by the Cooper–Jacob approximation), so a steady R stands for some period of
-        pumping. Because a ring around a compact excavation acts like one large well, the least
-        total rate for a small site barely changes with the number of wells.</p>
+        pumping. Because a ring around a compact excavation acts like one large well, Q<sub>min</sub>
+        for a small site barely changes with the number of wells.</p>
       <h3>Steps</h3>
       <ol>
         <li>Find the site (search, or zoom and pan) and draw the excavation outline, drag a
@@ -277,7 +279,7 @@
           calculation treats the ground and the water table as level. Then enter k and R: typed in,
           or from Sichardt's or Kusakin's formula.</li>
         <li>Click to place wells, or generate a ring at an offset from the edge.</li>
-        <li>Enter a pumping rate and check the results, or find the least rate that works.</li>
+        <li>Enter a pumping rate and check the results, or find Q<sub>min</sub>.</li>
         <li>Choose what the contours show: depth to water, water elevation (with a ground
           elevation), drawdown, water below the required level, or head above the low-k layer. The
           orange contour is the required level, and the area where the water is below it is shaded
@@ -285,7 +287,7 @@
         <li>Check a cross section: east–west or north–south through the excavation, or any line
           you draw. It shows the water level against the static level and the required level, with
           the ground, the excavation, and the wells on the line.</li>
-        <li>Use the design curves: the least total rate against the number of wells (rings at the
+        <li>Use the design curves: Q<sub>min</sub> against the number of wells (rings at the
           offset), or against k for the wells on the map.</li>
       </ol>
       <p class="hint">Units: lengths are in meters or feet (the switch at the top of the panel);
@@ -302,6 +304,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-  <script type="module" src="js/app.js?v=26"></script>
+  <script type="module" src="js/app.js?v=27"></script>
 </body>
 </html>
