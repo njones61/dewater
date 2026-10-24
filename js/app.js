@@ -78,7 +78,7 @@ const Qf = () => Q_UNITS[$("in-Q-unit").value];
 const Qn = () => $("in-Q-unit").selectedOptions[0].textContent;
 const numL = (id) => num(id) * Lf();                              // a length input, in meters
 const fmtL = (v, d) => `${fmt(v / Lf(), d)} ${Ln()}`;
-const LEN_INPUTS = ["in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-zg", "in-zb", "in-H", "in-target", "in-R", "in-rw", "in-offset", "in-interval"];
+const LEN_INPUTS = ["in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-ewt", "in-ebase", "in-eexc", "in-ereq", "in-R", "in-rw", "in-offset", "in-interval"];
 const trim = (v) => String(+v.toPrecision(6));
 
 function setLenLabels() { document.querySelectorAll(".uL").forEach((e) => (e.textContent = Ln())); }
@@ -122,8 +122,11 @@ function toLL(p) {
 // ------------------------------------------------------------------ inputs
 // Levels come in either as depths below level ground (the depth to the water table, to the
 // bottom of the aquifer, and of the excavation, plus any extra depth the water must reach below
-// the excavation bottom) or directly as the heads the model uses, measured up from the top of the
-// low-k layer: H, the initial saturated thickness, and the target head.
+// the excavation bottom) or as elevations (the water table, the top of the low-k layer, the
+// excavation bottom, and the required water level, with the ground elevation typed or read from
+// terrain). Either way they become one site in depths below the ground elevation, and the model
+// uses H, the initial saturated thickness, and the target head, both measured up from the top of
+// the low-k layer.
 const mode = () => document.querySelector('input[name="mode"]:checked').value;
 function params() {
   const p = {
@@ -138,12 +141,10 @@ function params() {
     p.H = site.dbase - site.dwt;
     p.target = site.dbase - (site.dexc + site.margin);
   } else {
-    // the same four levels as heights above the low-k layer; kept as a site so the results and
-    // the cross section show the ground and the excavation, labeled in heights
-    const zg = numL("in-zg"), zb = numL("in-zb");
-    p.H = numL("in-H");
-    p.target = numL("in-target");
-    p.site = { dbase: zg, dwt: zg - p.H, dexc: zg - zb, margin: zb - p.target, gelev: NaN, heads: true };
+    const g = numL("in-gelev"), ewt = numL("in-ewt"), ebase = numL("in-ebase"), eexc = numL("in-eexc"), ereq = numL("in-ereq");
+    p.site = { dbase: g - ebase, dwt: g - ewt, dexc: g - eexc, margin: eexc - ereq, gelev: g, elev: true };
+    p.H = ewt - ebase;
+    p.target = ereq - ebase;
   }
   if (p.Rmethod !== "entered") p.R = radius(p, p.k);
   return p;
@@ -185,9 +186,9 @@ $("in-R-method").addEventListener("change", () => { showR(); schedule(); });
 function updateDerived() {
   showR();
   const p = params(), s = p.site;
-  if (s && s.heads) {
-    $("derived").textContent = [s.dwt, s.dexc, s.margin].every(Number.isFinite)
-      ? `Water table ${fmtL(s.dwt, 2)} below ground; excavation ${fmtL(s.dexc, 2)} deep; the water must be ${fmtL(s.margin, 2)} below its bottom.` : "";
+  if (s && s.elev) {
+    $("derived").textContent = [p.H, p.target, s.dwt, s.dexc].every(Number.isFinite)
+      ? `Saturated thickness H = ${fmtL(p.H, 2)}; target head ${fmtL(p.target, 2)} above the low-k layer. Water table ${fmtL(s.dwt, 2)} below ground; excavation ${fmtL(s.dexc, 2)} deep.` : "";
   } else if (s && [s.dwt, s.dbase, s.dexc].every(Number.isFinite)) {
     $("derived").textContent = `Saturated thickness H = ${fmtL(p.H, 2)}. The water must come down to ${fmtL(s.dexc + s.margin, 2)} below ground: a head of ${fmtL(p.target, 2)} above the low-k layer.`
       + (Number.isFinite(s.gelev) ? ` Water table at elevation ${fmt((s.gelev - s.dwt) / Lf(), 2)}; required level ${fmt((s.gelev - s.dexc - s.margin) / Lf(), 2)}.` : "");
@@ -196,32 +197,46 @@ function updateDerived() {
 // Switching how the levels are entered carries the site over, so the design stays the same.
 function carryLevels() {
   const setL = (id, v) => { if (Number.isFinite(v)) $(id).value = trim(v / Lf()); };
-  if (mode() === "head") {
+  if (mode() === "elev") {
     const dwt = numL("in-dwt"), dbase = numL("in-dbase"), dexc = numL("in-dexc"), mg = numL("in-margin") || 0;
-    setL("in-zg", dbase); setL("in-H", dbase - dwt); setL("in-zb", dbase - dexc); setL("in-target", dbase - dexc - mg);
+    // without a ground elevation, the datum is the top of the low-k layer
+    let g = numL("in-gelev");
+    if (!Number.isFinite(g)) { g = dbase; setL("in-gelev", g); }
+    setL("in-ewt", g - dwt); setL("in-ebase", g - dbase); setL("in-eexc", g - dexc); setL("in-ereq", g - dexc - mg);
   } else {
-    const zg = numL("in-zg"), H = numL("in-H"), zb = numL("in-zb"), t = numL("in-target");
-    setL("in-dbase", zg); setL("in-dwt", zg - H); setL("in-dexc", zg - zb); setL("in-margin", zb - t);
+    const g = numL("in-gelev"), ewt = numL("in-ewt"), ebase = numL("in-ebase"), eexc = numL("in-eexc"), ereq = numL("in-ereq");
+    setL("in-dwt", g - ewt); setL("in-dbase", g - ebase); setL("in-dexc", g - eexc); setL("in-margin", eexc - ereq);
   }
 }
 function showMode() {
   $("depth-fields").hidden = mode() !== "depth";
-  $("head-fields").hidden = mode() === "depth";
-  // elevations need the ground elevation, which only the depth inputs take
-  $("in-field").querySelector('option[value="elev"]').disabled = mode() !== "depth";
-  if (mode() !== "depth" && $("in-field").value === "elev") $("in-field").value = "h";
+  $("elev-fields").hidden = mode() !== "elev";
+  const el = mode() === "elev";
+  $("gelev-label").textContent = el ? "Ground elevation" : "Ground elevation, optional";
+  $("in-gelev").placeholder = el ? "required" : "blank = depths only";
+  // contours in the way the levels are entered
+  if (el && $("in-field").value === "wdepth") $("in-field").value = "elev";
+  if (!el && $("in-field").value === "elev") $("in-field").value = "wdepth";
 }
-document.querySelectorAll('input[name="mode"]').forEach((r) => r.addEventListener("change", () => {
+// Switching to elevations without a ground elevation reads it from the terrain first, so the
+// depths carry over as real elevations (the datum falls to the top of the low-k layer only when
+// there is no excavation yet or no terrain data).
+document.querySelectorAll('input[name="mode"]').forEach((r) => r.addEventListener("change", async () => {
+  if (mode() === "elev" && !Number.isFinite(numL("in-gelev")) && state.excavation) await setTerrain(true);
   carryLevels(); showMode(); updateDerived(); schedule();
 }));
 function checkParams(p) {
   if (!(p.k > 0)) return "Enter a hydraulic conductivity greater than zero.";
   const st = p.site;
-  if (st && st.heads) {
-    if (!(st.dbase > 0)) return "Enter a ground surface height greater than zero.";
-    if (!(st.dwt >= 0)) return "The water table must be at or below the ground surface.";
-    if (!(st.dexc > 0)) return "The excavation bottom must be below the ground surface.";
-    if (!(st.margin >= 0)) return "The target head must be at or below the excavation bottom.";
+  if (st && st.elev) {
+    if (!Number.isFinite(st.gelev)) return "Enter the ground elevation, or use terrain.";
+    if (![st.dwt, st.dbase, st.dexc, st.margin].every(Number.isFinite)) return "Enter all four elevations.";
+    if (!(st.dwt >= 0)) return "The water table must be at or below the ground.";
+    if (!(st.dbase > st.dwt)) return "The top of the low-k layer must be below the water table.";
+    if (!(st.dexc > 0)) return "The excavation bottom must be below the ground.";
+    if (!(st.margin >= 0)) return "The required water level must be at or below the excavation bottom.";
+    if (!(st.dexc + st.margin < st.dbase)) return "The required water level must be above the top of the low-k layer.";
+    if (!(st.dexc + st.margin > st.dwt)) return "The required level is above the water table: no dewatering is needed.";
   } else if (st) {
     if (!(st.dwt >= 0)) return "Enter a depth to the water table of zero or more.";
     if (!(st.dbase > st.dwt)) return "The bottom of the aquifer must be deeper than the water table.";
@@ -469,9 +484,10 @@ function run() {
     ["Total rate, Q", fmtQ(p.Q)],
   ];
   const st = p.site;
-  if (ring && st && st.heads) {
-    rows.push(["Highest head in the excavation", fmtL(hmax, 2)]);
-    rows.push(["Excavation bottom", fmtL(st.dbase - st.dexc, 2)]);
+  const E = (z) => fmt((st.gelev - st.dbase + z) / Lf(), 2);        // a height above the low-k layer as an elevation
+  if (ring && st && st.elev) {
+    rows.push(["Highest water in the excavation, elevation", E(hmax)]);
+    rows.push(["Excavation bottom, elevation", E(st.dbase - st.dexc)]);
     rows.push(["Water below the bottom", `${fmtL(st.dbase - hmax - st.dexc, 2)} (need ${fmt(st.margin / Lf(), 2)})`]);
   } else if (ring && st) {
     rows.push(["Highest water in the excavation", `${fmtL(st.dbase - hmax, 2)} below ground`]);
@@ -487,7 +503,7 @@ function run() {
     rows.push(["Equivalent radius, √(A/π)", fmtL(rEquiv(), 1)]);
     rows.push(["R from the formula", fmtL(p.R, 0)]);
   }
-  rows.push(st && !st.heads ? ["Deepest water, at a well", `${fmtL(st.dbase - Math.min(...hw), 2)} below ground`] : ["Lowest head at a well", fmtL(Math.min(...hw), 2)]);
+  rows.push(st && st.elev ? ["Lowest water, at a well, elevation", E(Math.min(...hw))] : st ? ["Deepest water, at a well", `${fmtL(st.dbase - Math.min(...hw), 2)} below ground`] : ["Lowest head at a well", fmtL(Math.min(...hw), 2)]);
   $("results").innerHTML = rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("");
   if (dryWells.length) {
     setStatus("bad", `${dryWells.length} well${dryWells.length > 1 ? "s" : ""} pumped dry (shown red): the rate is more than the aquifer can deliver there. Add wells or lower Q.`);
@@ -617,7 +633,7 @@ function drawResults() {
   // the highest point in the excavation
   if (last.at && last.hmax > p.target) {
     L.circleMarker(toLL(last.at), { radius: 7, color: "#b3261e", weight: 3, fill: false, highPoint: true })
-      .bindTooltip(p.site && !p.site.heads ? `Highest water in the excavation: ${fmtL(p.site.dbase - last.hmax, 2)} below ground` : `Highest water in the excavation: h = ${fmtL(last.hmax, 2)}`).addTo(marks);
+      .bindTooltip(p.site && p.site.elev ? `Highest water in the excavation: elevation ${fmt((p.site.gelev - p.site.dbase + last.hmax) / Lf(), 2)}` : p.site ? `Highest water in the excavation: ${fmtL(p.site.dbase - last.hmax, 2)} below ground` : `Highest water in the excavation: h = ${fmtL(last.hmax, 2)}`).addTo(marks);
   }
 
   // legend
@@ -661,7 +677,7 @@ buildRampPicker();
 
 ["in-field", "in-interval", "in-fill", "in-dewatered", "in-ramp", "in-ramp-rev"].forEach((id) => $(id).addEventListener("change", () => { drawResults(); persist(); }));
 $("in-opacity").addEventListener("input", () => fill.setOpacity(parseFloat($("in-opacity").value)));
-["in-k", "in-k-unit", "in-zg", "in-zb", "in-H", "in-R", "in-target", "in-rw", "in-Q", "in-Q-unit", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev"]
+["in-k", "in-k-unit", "in-ewt", "in-ebase", "in-eexc", "in-ereq", "in-R", "in-rw", "in-Q", "in-Q-unit", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev"]
   .forEach((id) => $(id).addEventListener("input", () => { updateDerived(); schedule(250); }));
 
 // ------------------------------------------------------------------ terrain
@@ -802,7 +818,7 @@ function drawSection() {
   const zTop = st ? Math.max(st.dbase, ...(terr ? terr.z : [])) + 0.05 * st.dbase : p.H * 1.08;
   const zBot = terr ? Math.min(0, ...terr.z) : 0;
   const y = d3.scaleLinear().domain([zBot, zTop]).range([Ht - m.b, m.t]);
-  const asDepth = st && !st.heads;
+  const asDepth = !!st;
   const lev = (z) => (asDepth ? (Number.isFinite(st.gelev) ? st.gelev - st.dbase + z : st.dbase - z) : z);
   const unlev = (v) => (asDepth ? (Number.isFinite(st.gelev) ? v - (st.gelev - st.dbase) : st.dbase - v) : v);
   // round ticks in the display unit, placed on the SI scales
@@ -842,8 +858,9 @@ function drawSection() {
   };
   if (st) {
     if (!terr) hline(st.dbase, "#8a6d3b", "", "Ground");
-    hline(p.H, "#5b6875", "6,4", st.heads ? `Water table before pumping, H = ${fmtL(p.H, 1)}` : `Water table before pumping, ${fmtL(st.dwt, 1)} deep`, !!terr);
-    hline(p.target, "#E8582C", "6,4", st.heads ? `Required level, ${fmtL(p.target, 1)}` : `Required level, ${fmtL(st.dexc + st.margin, 1)} deep`);
+    const el = (z) => fmt((st.gelev - st.dbase + z) / Lf(), 1);
+    hline(p.H, "#5b6875", "6,4", st.elev ? `Water table before pumping, elevation ${el(p.H)}` : `Water table before pumping, ${fmtL(st.dwt, 1)} deep`, !!terr);
+    hline(p.target, "#E8582C", "6,4", st.elev ? `Required level, elevation ${el(p.target)}` : `Required level, ${fmtL(st.dexc + st.margin, 1)} deep`);
   } else {
     hline(p.H, "#5b6875", "6,4", `Static level, H = ${fmtL(p.H, 1)}`);
     hline(p.target, "#E8582C", "6,4", `Target, ${fmtL(p.target, 1)}`);
@@ -859,7 +876,7 @@ function drawSection() {
   svg.append("text").attr("class", "axis-title").attr("x", m.l + 4).attr("y", Ht - 4).text("A");
   svg.append("text").attr("class", "axis-title").attr("x", Wd - m.r - 4).attr("y", Ht - 4).attr("text-anchor", "end").text("A′");
   svg.append("text").attr("class", "axis-title").attr("x", (m.l + Wd - m.r) / 2).attr("y", Ht - 4).attr("text-anchor", "middle").text(`Distance along the section (${Ln()})`);
-  svg.append("text").attr("class", "axis-title").attr("transform", `translate(14,${(m.t + Ht - m.b) / 2}) rotate(-90)`).attr("text-anchor", "middle").text(`${asDepth ? (Number.isFinite(st.gelev) ? "Elevation" : "Depth below ground") : "Height above the low-k layer"} (${Ln()})`);
+  svg.append("text").attr("class", "axis-title").attr("transform", `translate(14,${(m.t + Ht - m.b) / 2}) rotate(-90)`).attr("text-anchor", "middle").text(`${st ? (Number.isFinite(st.gelev) ? "Elevation" : "Depth below ground") : "Head, h"} (${Ln()})`);
   // the actual ground along the line, from the terrain tiles (read in drawSection's first lines)
   if (terr) {
     svg.append("path").datum(terr.d.map((d, i) => [d, terr.z[i]])).attr("fill", "none").attr("stroke", "#5c4a1f").attr("stroke-width", 2)
@@ -878,7 +895,7 @@ function drawSection() {
     const right = x(top.d) < (m.l + Wd - m.r) / 2;
     svg.append("text").attr("x", x(top.d) + (right ? 9 : -9)).attr("y", y(top.h) - 7).attr("text-anchor", right ? "start" : "end").attr("fill", "#1d2733")
       .attr("paint-order", "stroke").attr("stroke", "#fff").attr("stroke-width", 4).attr("stroke-linejoin", "round")
-      .text(asDepth ? `${fmtL(st.dbase - top.h, 2)} deep` : `h = ${fmtL(top.h, 2)}`);
+      .text(st && st.elev ? `elevation ${fmt((st.gelev - st.dbase + top.h) / Lf(), 2)}` : st ? `${fmtL(st.dbase - top.h, 2)} deep` : `h = ${fmtL(top.h, 2)}`);
   }
   $("section-title").textContent = `Cross section A–A′ (${fmtL(len, 0)})${near.length ? ` · ${near.length} well${near.length > 1 ? "s" : ""} on the line` : ""}`
     + (terr ? " · ground from terrain data; the calculation treats it as level" : "");
@@ -1041,7 +1058,7 @@ $("btn-export-contours").onclick = () => {
   download("contours.geojson", JSON.stringify(fc), "application/geo+json");
 };
 
-const INPUTS = ["in-R-method", "in-curve-var", "in-kmin", "in-kmax", "in-k", "in-k-unit", "in-zg", "in-zb", "in-H", "in-R", "in-target", "in-rw", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-Q", "in-Q-unit", "in-offset", "in-nwells", "in-field", "in-interval", "in-nmin", "in-nmax", "in-ramp"];
+const INPUTS = ["in-R-method", "in-curve-var", "in-kmin", "in-kmax", "in-k", "in-k-unit", "in-ewt", "in-ebase", "in-eexc", "in-ereq", "in-R", "in-rw", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-Q", "in-Q-unit", "in-offset", "in-nwells", "in-field", "in-interval", "in-nmin", "in-nmax", "in-ramp"];
 function project() {
   const f = excFeature();
   return {
@@ -1065,11 +1082,17 @@ function restore(pr, fit = true) {
   const legacy = { "in-k-unit": { "0.01": "cms", "1": "ms", "1.1574074074074074e-5": "mday", "3.5277777777777777e-6": "ftday" }, "in-Q-unit": { "1": "m3s", "0.001": "lps", "6.30902e-5": "gpm" } };
   Object.entries(pr.inputs || {}).forEach(([id, v]) => { if ($(id)) $(id).value = (legacy[id] && legacy[id][v]) || v; });
   ["in-k-unit", "in-Q-unit"].forEach((id) => ($(id).dataset.prev = $(id).value));
-  const r = document.querySelector(`input[name="mode"][value="${pr.mode || "head"}"]`);
+  // projects saved with heads above the low-k layer (H and the target head, with a ground height
+  // in later versions) open as elevations with the datum at the low-k layer
+  let md = pr.mode || "head";
+  if (md === "head") {
+    const v = pr.inputs || {}, H = v["in-H"], t = v["in-target"];
+    $("in-gelev").value = v["in-zg"] ?? H; $("in-ewt").value = H; $("in-ebase").value = 0;
+    $("in-eexc").value = v["in-zb"] ?? t; $("in-ereq").value = t;
+    md = "elev";
+  }
+  const r = document.querySelector(`input[name="mode"][value="${md}"]`);
   if (r) { r.checked = true; showMode(); updateDerived(); }
-  // projects saved before the ground and excavation heights: ground at the water table, the
-  // excavation bottom at the target
-  if (pr.inputs && !("in-zg" in pr.inputs)) { $("in-zg").value = $("in-H").value; $("in-zb").value = $("in-target").value; }
   if (state.excavation) { map.removeLayer(state.excavation); state.excavation = null; }
   clearWells();
   if (pr.excavation) {

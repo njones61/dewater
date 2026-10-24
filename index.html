@@ -60,22 +60,23 @@
         <h2><span class="num">2</span>Site and aquifer</h2>
         <div class="seg" role="radiogroup" aria-label="How to enter the levels">
           <label><input type="radio" name="mode" value="depth" checked> Depths below ground</label>
-          <label><input type="radio" name="mode" value="head"> Heads above low-k layer</label>
+          <label><input type="radio" name="mode" value="elev"> Elevations</label>
         </div>
         <div class="fields two" id="depth-fields">
           <label><span>Depth to the water table (<span class="uL">m</span>)</span><input id="in-dwt" type="number" step="any" value="5"></label>
           <label><span>Depth to the bottom of the aquifer (<span class="uL">m</span>)</span><input id="in-dbase" type="number" step="any" value="55"></label>
           <label><span>Excavation depth (<span class="uL">m</span>)</span><input id="in-dexc" type="number" step="any" value="20"></label>
           <label><span>Extra depth below the bottom (<span class="uL">m</span>)</span><input id="in-margin" type="number" step="any" value="0"></label>
-          <label class="span2"><span>Ground elevation (<span class="uL">m</span>), optional</span>
-            <span class="pair"><input id="in-gelev" type="number" step="any" placeholder="blank = depths only"><label class="switch" title="Read the ground from terrain data"><input id="in-terrain" type="checkbox"><span>Use terrain</span></label></span></label>
         </div>
-        <div class="fields two" id="head-fields" hidden>
-          <label><span>Ground surface (<span class="uL">m</span>)</span><input id="in-zg" type="number" step="any" value="55"></label>
-          <label><span>Water table, H (<span class="uL">m</span>)</span><input id="in-H" type="number" step="any" value="50"></label>
-          <label><span>Excavation bottom (<span class="uL">m</span>)</span><input id="in-zb" type="number" step="any" value="35"></label>
-          <label><span>Target head (<span class="uL">m</span>)</span><input id="in-target" type="number" step="any" value="35"></label>
-          <p class="hint span2">Heights above the top of the low-k layer. H is the initial saturated thickness.</p>
+        <div class="fields two" id="elev-fields" hidden>
+          <label><span>Water table (<span class="uL">m</span>)</span><input id="in-ewt" type="number" step="any" value="50"></label>
+          <label><span>Top of the low-k layer (<span class="uL">m</span>)</span><input id="in-ebase" type="number" step="any" value="0"></label>
+          <label><span>Excavation bottom (<span class="uL">m</span>)</span><input id="in-eexc" type="number" step="any" value="35"></label>
+          <label><span>Required water level (<span class="uL">m</span>)</span><input id="in-ereq" type="number" step="any" value="35"></label>
+        </div>
+        <div class="fields two">
+          <label class="span2"><span><span id="gelev-label">Ground elevation, optional</span> (<span class="uL">m</span>)</span>
+            <span class="pair"><input id="in-gelev" type="number" step="any" placeholder="blank = depths only"><label class="switch" title="Read the ground from terrain data"><input id="in-terrain" type="checkbox"><span>Use terrain</span></label></span></label>
         </div>
         <p class="readout" id="derived"></p>
         <div class="fields two">
@@ -262,7 +263,7 @@
           rectangle (Rotate turns it to match the site), or load a GeoJSON polygon.</li>
         <li>Enter the site: the depths to the water table, to the bottom of the aquifer (the top
           of the low-k layer), and of the excavation, and how far below the excavation bottom the
-          water must be. Or switch to heights above the low-k layer: the ground surface, the water table (H), the excavation bottom, and the target head. A ground elevation
+          water must be. Or switch to elevations: the water table, the top of the low-k layer, the excavation bottom, and the required water level, with the ground elevation typed in or read from terrain. A ground elevation
           is optional; with it, results are also given as elevations. <b>Use terrain</b> fills it
           with the average ground elevation over the excavation, from open terrain data (USGS 3DEP in
           the US), and the cross section then shows the actual ground profile. The calculation still
@@ -288,6 +289,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-  <script type="module" src="js/app.js?v=24"></script>
+  <script type="module" src="js/app.js?v=25"></script>
 </body>
 </html>
