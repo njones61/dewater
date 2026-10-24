@@ -120,6 +120,22 @@
           <button id="btn-generate" class="primary">Generate wells</button>
         </details>
         <p class="readout" id="wells-info">No wells yet.</p>
+        <details class="sub" id="wall-box">
+          <summary>Cutoff wall</summary>
+          <label class="switch"><input id="in-wall" type="checkbox"><span>Enclose the site with a cutoff wall</span></label>
+          <div class="fields two">
+            <label><span>Offset from the edge (<span class="uL">m</span>)</span><input id="in-woff" type="number" step="any" value="20"></label>
+            <label><span>Thickness, t (<span class="uL">m</span>)</span><input id="in-wthick" type="number" step="any" value="0.9"></label>
+            <label class="span2">Wall conductivity, k<sub>w</sub>
+              <span class="pair"><input id="in-kw" type="number" step="any" value="1e-7">
+                <select id="in-kw-unit"><option value="cms" selected>cm/s</option><option value="ms">m/s</option><option value="mday">m/day</option><option value="fts">ft/s</option><option value="ftday">ft/day</option></select></span></label>
+            <label>Specific yield, S<sub>y</sub><input id="in-sy" type="number" step="any" value="0.2"></label>
+            <label>Days to draw down<input id="in-tdrain" type="number" step="any" value="30" placeholder="blank = hold only"></label>
+          </div>
+          <p class="hint">The wall is keyed into the low-k layer, taken as impermeable, so water
+            reaches the site only through the wall. Inside, the water is level; the wells (or
+            sumps) pump out the water stored inside and then the leakage.</p>
+        </details>
       </section>
 
       <!-- 4. Pumping and results -->
@@ -250,6 +266,28 @@
         usually highest. A design fails if Q<sub>min</sub> would pump a well dry (the head at its
         radius drops to zero): add wells or move them out. The rate actually specified is usually
         Q<sub>min</sub> plus a margin.</p>
+      <h3>A cutoff wall</h3>
+      <p>A slurry cutoff wall around the site, keyed into the low-k layer, cuts off the inflow:
+        water reaches the inside only through the wall. Two resistances act in series, both linear
+        in h². Outside, the enclosure acts as one large well of radius r<sub>W</sub> = √(A<sub>w</sub>/π),
+        where A<sub>w</sub> is the area inside the wall; across the wall, the trench equation applies
+        with the wall's thickness t, conductivity k<sub>w</sub>, and length P:</p>
+      <p class="eq">H² − h<sub>o</sub>² = Q · ln(R/r<sub>W</sub>)/(πk) &nbsp;&nbsp;&nbsp; h<sub>o</sub>² − h<sub>i</sub>² = Q · 2t/(P k<sub>w</sub>)</p>
+      <p>so the leakage with the water inside at h<sub>i</sub> is
+        Q = (H² − h<sub>i</sub>²)/(a + b), with a and b the two coefficients, and h<sub>o</sub> is
+        the head at the wall's outside face. The aquifer inside is far more permeable than the
+        wall, so the water inside is taken as level. First the wells must pump out the water stored
+        inside, while the leakage comes in:</p>
+      <p class="eq">S<sub>y</sub> A<sub>w</sub> dh/dt = −Q + (H² − h²)/(a + b)</p>
+      <p>which integrates in closed form to the time to draw the water down to the required level.
+        With a wall, Q<sub>min</sub> is the smallest rate that draws the water down within the days
+        allowed and then holds it there (with no time given, it is the leakage at the required
+        level). After the drawdown, the wells are taken to be throttled back to the leakage, and
+        the map and the section show that state: the water inside at the required level, and
+        outside, the leakage drawn in along the wall. With a tight wall nearly all the head is lost
+        across it, so Q<sub>min</sub> hardly depends on k or R. In practice, defects in the wall and
+        a poor key leak more than the wall itself, so allow a margin. A wall that doesn't reach a
+        low-k layer, or a low-k layer that leaks, needs a model with flow under the wall.</p>
       <h3>The radius of influence in practice</h3>
       <p>R is the least certain input. When a pumping test is available, R comes from it: plot the
         drawdowns at the observation wells against the log of distance and extend the line to zero
@@ -278,7 +316,9 @@
           scale, and the corner of the map shows the ground elevation under the pointer. The
           calculation treats the ground and the water table as level. Then enter k and R: typed in,
           or from Sichardt's or Kusakin's formula.</li>
-        <li>Click to place wells, or generate a ring at an offset from the edge.</li>
+        <li>Click to place wells, or generate a ring at an offset from the edge. To enclose the
+          site with a cutoff wall, open <b>Cutoff wall</b> and give its offset, thickness, and
+          conductivity, the aquifer's specific yield, and the days allowed to draw the water down.</li>
         <li>Enter a pumping rate and check the results, or find Q<sub>min</sub>.</li>
         <li>Choose what the contours show: depth to water, water elevation (with a ground
           elevation), drawdown, water below the required level, or head above the low-k layer. The
@@ -288,7 +328,7 @@
           you draw. It shows the water level against the static level and the required level, with
           the ground, the excavation, and the wells on the line.</li>
         <li>Use the design curves: Q<sub>min</sub> against the number of wells (rings at the
-          offset), or against k for the wells on the map.</li>
+          offset), or against k for the wells on the map (or for the wall).</li>
       </ol>
       <p class="hint">Units: lengths are in meters or feet (the switch at the top of the panel);
         k and Q each have their own unit, and every flow rate in the results, the design curve,
@@ -304,6 +344,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-  <script type="module" src="js/app.js?v=27"></script>
+  <script type="module" src="js/app.js?v=28"></script>
 </body>
 </html>

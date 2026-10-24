@@ -60,3 +60,41 @@ test("grid, inside, densify", () => {
   assert.ok(!inside({ x: 1.5, y: 0.5 }, sq));
   assert.equal(densify(sq, 0.25).length, 16);
 });
+
+import { wallCoeffs, wallLeak, wallOutside, wallSteady, wallDrainTime, wallQmin } from "../js/model.js";
+
+// the deck's example: a wall 20 m outside a 157 × 83 m excavation
+const pw = { H: 50, k: 5e-6, R: 165, rw: 0.15 };
+const wall = { P: 640, Aw: 197 * 123, t: 0.9, kw: 1e-9, Sy: 0.2 };
+
+test("wall leakage: the two resistances in series", () => {
+  const { a, b } = wallCoeffs(pw, wall);
+  const Q = wallLeak(35, pw, wall), ho = wallOutside(35, pw, wall);
+  close(pw.H ** 2 - ho ** 2, Q * a);                         // outside: one large well
+  close(ho ** 2 - 35 ** 2, Q * b);                            // the wall: the trench equation
+  close(Q, 640 * 1e-9 * (ho ** 2 - 35 ** 2) / (2 * 0.9));
+  assert.ok(Q > 4.4e-4 && Q < 4.6e-4);                        // about 0.45 L/s, as on the slide
+  close(wallSteady(Q, pw, wall), 35);
+});
+
+test("drain-down time matches a numerical integration", () => {
+  const Q = 0.02, n = 200000;
+  const leak = (h) => wallLeak(h, pw, wall);
+  let t = 0;
+  for (let i = 0; i < n; i++) {
+    const h = 35 + (pw.H - 35) * (i + 0.5) / n;
+    t += wall.Sy * wall.Aw * ((pw.H - 35) / n) / (Q - leak(h));
+  }
+  close(wallDrainTime(Q, pw, wall, 35), t, 1e-6);
+  assert.equal(wallDrainTime(wallLeak(35, pw, wall) * 0.99, pw, wall, 35), Infinity);
+  // pumping more than the wall passes even at h = 0 (D < 0) and exactly that much (D = 0)
+  const big = pw.H ** 2 / (wallCoeffs(pw, wall).a + wallCoeffs(pw, wall).b);
+  assert.ok(Number.isFinite(wallDrainTime(big * 1.5, pw, wall, 35)));
+  close(wallDrainTime(big, pw, wall, 35), wallDrainTime(big * (1 + 1e-9), pw, wall, 35), 1e-6);
+});
+
+test("Q_min with a wall drains in the time allowed, and is the leakage with no time limit", () => {
+  const T = 30 * 86400, Q = wallQmin(pw, wall, 35, T);
+  close(wallDrainTime(Q, pw, wall, 35), T, 1e-6);
+  close(wallQmin(pw, wall, 35, 0), wallLeak(35, pw, wall));
+});

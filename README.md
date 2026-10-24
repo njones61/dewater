@@ -7,8 +7,9 @@ Design a dewatering well system for an excavation in an unconfined aquifer, in t
 1. Find the site and draw the excavation outline on the map, drag a rectangle (and rotate it to
    match the site), or load a GeoJSON polygon.
 2. Enter the site as depths below ground (water table, bottom of the aquifer, excavation, and the
-   extra depth the water must reach below its bottom), or as H and the target head; then k and R.
-3. Click to place wells, or generate a ring of wells at an offset from the edge.
+   extra depth the water must reach below its bottom), or as elevations; then k and R.
+3. Click to place wells, or generate a ring of wells at an offset from the edge. Optionally,
+   enclose the site with a slurry cutoff wall keyed into the low-k layer.
 4. Enter a total pumping rate and check the contours, or find the minimum design pumping rate,
    Q_min: the smallest total rate that dewaters the excavation.
 5. Check cross sections of the water level: east–west, north–south, or along any line you draw.
@@ -35,7 +36,14 @@ Dupuit assumptions. The wells add in H² − h²:
 With the total rate Q shared equally by n wells, the minimum design pumping rate that brings every point in the
 excavation down to the target head is exact: Q_min = n (H² − h_target²) / min A, where
 A = Σ ln(R/rᵢ)/(πk) at each checked point. Points are checked on a grid over the excavation and
-along its edge. A design fails if that rate would pump a well dry. See *How it works* in the app.
+along its edge. A design fails if that rate would pump a well dry.
+
+With a cutoff wall keyed into an impermeable low-k layer, water reaches the inside only through
+the wall: the aquifer outside (the enclosure as one large well) and the wall (the trench equation
+across its thickness) act as two resistances in series, both linear in h², so the leakage is
+closed form. The water inside is taken as level. Q_min is then the smallest rate that draws the
+stored water down to the required level within the days allowed, with the leakage coming in (also
+closed form), and then holds it. See *How it works* in the app.
 
 This is a screening tool for teaching and preliminary design.
 

@@ -1,5 +1,5 @@
 // app.js — the map, the panel, and the drawing of results. The calculation is in model.js.
-import { heads, optimalRate, grid, inside, densify } from "./model.js";
+import { heads, optimalRate, grid, inside, densify, wallCoeffs, wallLeak, wallOutside, wallSteady, wallDrainTime, wallQmin } from "./model.js";
 import { elevations } from "./terrain.js";
 
 /* global L, turf, d3 */
@@ -61,6 +61,7 @@ const fill = L.imageOverlay("data:image/gif;base64,R0lGODlhAQABAAAAACw=", [[0, 0
 const lines = L.layerGroup([], { pane: "results" }).addTo(map);
 const shade = L.layerGroup([], { pane: "results" }).addTo(map);
 const marks = L.layerGroup().addTo(map);
+const wallLayer = L.layerGroup().addTo(map);
 
 const $ = (id) => document.getElementById(id);
 const num = (id) => parseFloat($(id).value);
@@ -78,7 +79,7 @@ const Qf = () => Q_UNITS[$("in-Q-unit").value];
 const Qn = () => $("in-Q-unit").selectedOptions[0].textContent;
 const numL = (id) => num(id) * Lf();                              // a length input, in meters
 const fmtL = (v, d) => `${fmt(v / Lf(), d)} ${Ln()}`;
-const LEN_INPUTS = ["in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-ewt", "in-ebase", "in-eexc", "in-ereq", "in-R", "in-rw", "in-offset", "in-interval"];
+const LEN_INPUTS = ["in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-ewt", "in-ebase", "in-eexc", "in-ereq", "in-R", "in-rw", "in-offset", "in-interval", "in-woff", "in-wthick"];
 const trim = (v) => String(+v.toPrecision(6));
 
 function setLenLabels() { document.querySelectorAll(".uL").forEach((e) => (e.textContent = Ln())); }
@@ -90,7 +91,7 @@ document.querySelectorAll('input[name="lenunit"]').forEach((r) => r.addEventList
   lastLen = lenUnit();
   setLenLabels(); updateDerived(); updateExcInfo(); showGroundRange(); drawGround(); schedule();
 }));
-for (const [id, units] of [["in-k", K_UNITS], ["in-Q", Q_UNITS]]) {
+for (const [id, units] of [["in-k", K_UNITS], ["in-Q", Q_UNITS], ["in-kw", K_UNITS]]) {
   const sel = $(`${id}-unit`);
   sel.dataset.prev = sel.value;
   sel.addEventListener("change", () => {
@@ -249,6 +250,14 @@ function checkParams(p) {
   if (!(p.rw > 0) || p.rw >= p.R) return "The well radius must be greater than zero and less than R.";
   if (!(p.target >= 0) || p.target >= p.H) return "The target head must be at least zero and less than H.";
   if (!(p.Q >= 0)) return "Enter a pumping rate of zero or more.";
+  if (wallOn()) {
+    const w = wallParams();
+    if (!(numL("in-woff") >= 0)) return "Enter a wall offset of zero or more.";
+    if (!(w.t > 0)) return "Enter a wall thickness greater than zero.";
+    if (!(w.kw > 0)) return "Enter a wall conductivity greater than zero.";
+    if (!(w.Sy > 0 && w.Sy <= 1)) return "Enter a specific yield between 0 and 1.";
+    if (w.T < 0) return "Enter the days to draw down as zero or more (or leave it blank).";
+  }
   return null;
 }
 
@@ -415,6 +424,31 @@ $("btn-generate").onclick = () => {
   schedule();
 };
 
+// ------------------------------------------------------------------ cutoff wall
+// The wall follows the excavation's outline offset outward; it is keyed into the low-k layer
+// (model.js has the leakage, the steady level inside, and the drain-down time).
+const wallOn = () => $("in-wall").checked && !!state.excavation;
+function wallParams() {
+  const T = num("in-tdrain");
+  return { t: numL("in-wthick"), kw: num("in-kw") * K_UNITS[$("in-kw-unit").value], Sy: num("in-sy"), T: Number.isFinite(T) ? T * 86400 : 0 };
+}
+function polyArea(r) {
+  let a = 0;
+  for (let i = 0, j = r.length - 1; i < r.length; j = i++) a += (r[j].x + r[i].x) * (r[j].y - r[i].y);
+  return Math.abs(a) / 2;
+}
+function wallGeom() {
+  const f = excFeature(), off = numL("in-woff");
+  const buf = off > 0 ? turf.buffer(f, off, { units: "meters", steps: 16 }) : f;
+  const geom = buf.geometry.type === "MultiPolygon" ? buf.geometry.coordinates[0] : buf.geometry.coordinates;
+  const ringLL = geom[0].slice(0, -1).map(([lng, lat]) => L.latLng(lat, lng));
+  const ring = ringLL.map(toXY);
+  let P = 0;
+  ring.forEach((q, i) => { const r2 = ring[(i + 1) % ring.length]; P += Math.hypot(r2.x - q.x, r2.y - q.y); });
+  return { ringLL, ring, P, Aw: polyArea(ring) };
+}
+$("in-wall").addEventListener("change", () => { if ($("in-wall").checked) $("wall-box").open = true; schedule(); });
+
 // ------------------------------------------------------------------ analysis
 let timer = null;
 function schedule(ms = 150) {
@@ -443,6 +477,7 @@ function checkPoints(ring) {
 
 function run() {
   clearResults();
+  wallLayer.clearLayers();
   const p = params(), err = checkParams(p);
   const ringLL = excRing();
   if (err) return setStatus("bad", err);
@@ -450,6 +485,7 @@ function run() {
   if (!state.origin) setOrigin((ringLL ? state.excavation.getBounds() : L.latLngBounds(state.wells.map((w) => w.marker.getLatLng()))).getCenter());
   const ring = ringLL ? ringLL.map(toXY) : null;
   const wells = state.wells.map((w) => toXY(w.marker.getLatLng()));
+  if (ring && wallOn()) return runWall(p, ring, wells);
   if (!wells.length) return setStatus("idle", "Add wells: click on the map, or generate a ring.");
   const n = wells.length, qEach = p.Q / n;
   const W = wells.map((w) => ({ ...w, q: qEach }));
@@ -517,6 +553,56 @@ function run() {
       : `Dewatered: the water is at or below the target head everywhere in the excavation.`);
   } else {
     setStatus("warn", `Not dewatered: the water is ${fmtL(hmax - p.target, 2)} above the required level at the marked point.`);
+  }
+}
+
+// The site inside a cutoff wall. The wells are taken as throttled to hold the water inside at the
+// required level once it is drawn down (or, if Q can't get it there, at the level Q holds); the
+// map and the section show that state. Outside, the leakage is drawn in along the wall: sinks
+// spaced along it, superposed as for wells.
+function runWall(p, ring, wells) {
+  const g = wallGeom(), wp = wallParams(), w = { P: g.P, Aw: g.Aw, t: wp.t, kw: wp.kw, Sy: wp.Sy };
+  L.polygon(g.ringLL, { color: "#ffffff", weight: 8, opacity: 0.9, fill: false, interactive: false }).addTo(wallLayer);
+  L.polygon(g.ringLL, { color: "#3d4550", weight: 4, opacity: 1, fill: false }).bindTooltip("Cutoff wall", { sticky: true }).addTo(wallLayer);
+  const leakT = wallLeak(p.target, p, w);
+  const hHold = Math.max(wallSteady(p.Q, p, w), p.target);
+  const leak = wallLeak(hHold, p, w), hOut = wallOutside(hHold, p, w);
+  const sp = Math.max(g.P / 600, 0.5);
+  const sinks = densify(g.ring, sp), S = sinks.map((q) => ({ ...q, q: leak / sinks.length })), pOut = { ...p, rw: sp / 2 };
+  const headAt = (pts) => { const h = heads(pts, S, pOut).h; pts.forEach((q, i) => { if (inside(q, g.ring)) h[i] = hHold; }); return h; };
+
+  const box = analysisBox([...g.ring, ...wells]);
+  const nx = 220, ny = Math.round(nx * (box[3] - box[2]) / (box[1] - box[0]));
+  const h = headAt(grid(box, nx, ny));
+  const n = wells.length, qEach = n ? p.Q / n : 0, hw = wells.map(() => hHold);
+  state.wells.forEach((wl) => wl.marker.setIcon(wellIcon(false)));
+  state.last = { p, box, nx, ny, h, ring, wells, hmax: hHold, at: null, hw, qEach, headAt, wall: { ...g, w, hHold, leak, hOut } };
+  drawResults();
+  drawSection();
+
+  const st = p.site;
+  const lvl = (z) => (st && st.elev ? `elevation ${fmt((st.gelev - st.dbase + z) / Lf(), 2)}` : st ? `${fmtL(st.dbase - z, 2)} below ground` : `h = ${fmtL(z, 2)}`);
+  const tDrain = wallDrainTime(p.Q, p, w, p.target), days = (t) => (Number.isFinite(t) ? `${fmt(t / 86400, t < 10 * 86400 ? 1 : 0)} days` : "an unlimited time");
+  const V = w.Sy * w.Aw * (p.H - p.target), outside = wells.filter((q) => !inside(q, g.ring)).length;
+  const rows = [
+    ["Wall length, P", fmtL(g.P, 0)],
+    ["Area inside the wall, A<sub>w</sub>", `${fmt(g.Aw / Lf() ** 2, 0)} ${Ln()}²`],
+    ["Leakage at the required level", fmtQ(leakT)],
+    ["Water stored above the required level, S<sub>y</sub>A<sub>w</sub>(H − h<sub>t</sub>)", `${fmt(V / Lf() ** 3, 0)} ${Ln()}³`],
+    ["Total rate, Q", fmtQ(p.Q)],
+    ["Time to draw down at Q", Number.isFinite(tDrain) ? days(tDrain) : "never: Q is less than the leakage"],
+  ];
+  if (n) rows.push(["Wells", `${n}${outside ? ` (${outside} outside the wall)` : ""}`], ["Rate per well", fmtQ(qEach)]);
+  rows.push(["Water inside the wall", lvl(hHold)], ["Water at the wall's outside face", lvl(hOut)]);
+  if (p.Rmethod !== "entered") rows.push(["Equivalent radius, √(A/π)", fmtL(rEquiv(), 1)], ["R from the formula", fmtL(p.R, 0)]);
+  $("results").innerHTML = rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("");
+  const where = outside ? ` ${outside} well${outside > 1 ? "s are" : " is"} outside the wall: move ${outside > 1 ? "them" : "it"} inside.` : "";
+  if (hHold > p.target + 1e-9) {
+    setStatus("warn", `Not dewatered: at this rate the water inside the wall levels off ${fmtL(hHold - p.target, 2)} above the required level. Q must be more than the leakage, ${fmtQ(leakT)}.${where}`);
+  } else if (state.optQ && Math.abs(p.Q - state.optQ) <= 1e-5 * state.optQ) {
+    setStatus(outside ? "warn" : "ok", `Minimum design pumping rate: ${fmtQ(state.optQ)}. ${wp.T > 0 ? `It draws the water inside the wall down to the required level in ${days(wp.T)}; then` : "It holds the water inside the wall at the required level once it is drawn down;"} the wells need only the leakage through the wall, ${fmtQ(leakT)}.${where}`);
+  } else {
+    setStatus(outside ? "warn" : "ok", `Dewatered in ${days(tDrain)}; after that the wells need only the leakage through the wall, ${fmtQ(leakT)}.${where}`);
   }
 }
 
@@ -677,7 +763,7 @@ buildRampPicker();
 
 ["in-field", "in-interval", "in-fill", "in-dewatered", "in-ramp", "in-ramp-rev"].forEach((id) => $(id).addEventListener("change", () => { drawResults(); persist(); }));
 $("in-opacity").addEventListener("input", () => fill.setOpacity(parseFloat($("in-opacity").value)));
-["in-k", "in-k-unit", "in-ewt", "in-ebase", "in-eexc", "in-ereq", "in-R", "in-rw", "in-Q", "in-Q-unit", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev"]
+["in-k", "in-k-unit", "in-ewt", "in-ebase", "in-eexc", "in-ereq", "in-R", "in-rw", "in-Q", "in-Q-unit", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-woff", "in-wthick", "in-kw", "in-kw-unit", "in-sy", "in-tdrain"]
   .forEach((id) => $(id).addEventListener("input", () => { updateDerived(); schedule(250); }));
 
 // ------------------------------------------------------------------ terrain
@@ -875,12 +961,12 @@ function drawSection() {
   L.polyline([A, B], { color: "#1d2733", weight: 2.5, dashArray: "8,5", interactive: false }).addTo(secLayer);
   [["A", A], ["A′", B]].forEach(([t, ll]) => L.tooltip({ permanent: true, direction: "center", className: "sec-label", interactive: false }).setLatLng(ll).setContent(t).addTo(secLayer));
 
-  const { p, wells, qEach, ring } = state.last;
+  const { p, wells, qEach, ring, wall } = state.last;
   const W = wells.map((w) => ({ ...w, q: qEach }));
   const N = 400, ux = (b.x - a.x) / len, uy = (b.y - a.y) / len;
   const pts = d3.range(N + 1).map((i) => ({ x: a.x + ux * len * i / N, y: a.y + uy * len * i / N }));
-  const { h } = heads(pts, W, p);
-  const prof = pts.map((q, i) => ({ d: len * i / N, h: h[i], inExc: ring ? inside(q, ring) : false }));
+  const h = state.last.headAt ? state.last.headAt(pts) : heads(pts, W, p).h;
+  const prof = pts.map((q, i) => ({ d: len * i / N, h: h[i], inExc: ring ? inside(q, ring) : false, inWall: wall ? inside(q, wall.ring) : false }));
   state.secData = { prof, st: p.site };
   // wells within a few percent of the line's length of it, at their place along it
   const near = wells.map((w, i) => ({ i, d: (w.x - a.x) * ux + (w.y - a.y) * uy, off: Math.abs(-(w.x - a.x) * uy + (w.y - a.y) * ux) }))
@@ -963,6 +1049,14 @@ function drawSection() {
   svg.append("line").attr("x1", m.l).attr("x2", Wd - m.r).attr("y1", y(0)).attr("y2", y(0)).attr("stroke", "#1d2733").attr("stroke-width", 3);
   svg.append("path").datum(prof).attr("fill", "none").attr("stroke", "#1F4E79").attr("stroke-width", 2.5)
     .attr("d", d3.line().x((q) => x(q.d)).y((q) => y(q.h)));
+  // the cutoff wall where the line crosses it, from the ground to the low-k layer
+  prof.forEach((q, i) => {
+    if (!i || q.inWall === prof[i - 1].inWall) return;
+    const d = (q.d + prof[i - 1].d) / 2, top = terr ? tz(d) : st ? st.dbase : zTop;
+    const wpx = Math.max(5, x(wall.w.t) - x(0));
+    svg.append("rect").attr("x", x(d) - wpx / 2).attr("width", wpx).attr("y", y(top)).attr("height", y(0) - y(top))
+      .attr("fill", "#8e99a6").attr("stroke", "#1d2733").attr("stroke-width", 1);
+  });
   near.forEach((w) => {
     const wt = terr ? tz(w.d) : st ? st.dbase : zTop;          // the casing reaches the ground
     svg.append("rect").attr("x", x(w.d) - 3).attr("width", 6).attr("y", y(wt)).attr("height", y(0) - y(wt))
@@ -1026,6 +1120,14 @@ $("btn-optimize").onclick = () => {
   const p = params(), err = checkParams({ ...p, Q: 0 });
   if (err) return setStatus("bad", err);
   const ring = excRing();
+  if (ring && wallOn()) {
+    const g = wallGeom(), wp = wallParams();
+    const Q = wallQmin(p, { P: g.P, Aw: g.Aw, t: wp.t, kw: wp.kw, Sy: wp.Sy }, p.target, wp.T);
+    const qv = Q / Qf(), mag = 10 ** (Math.floor(Math.log10(qv)) - 5);
+    $("in-Q").value = trim(Math.ceil(qv / mag) * mag);
+    state.optQ = +$("in-Q").value * Qf();
+    return run();
+  }
   if (!ring || !state.wells.length) return setStatus("idle", "Finding Q\u2098\u1d62\u2099 needs an excavation and wells.");
   const r = ring.map(toXY), wells = state.wells.map((w) => toXY(w.marker.getLatLng()));
   const opt = optimalWithR(checkPoints(r), wells, p);
@@ -1060,6 +1162,22 @@ $("btn-curve").onclick = () => {
   const cp = checkPoints(excRing().map(toXY));
   curveVar = $("in-curve-var").value;
   curveRows = [];
+  if (wallOn()) {
+    if (curveVar === "n") return alertMsg("With a cutoff wall, Q\u2098\u1d62\u2099 doesn't depend on the number of wells. Try Q\u2098\u1d62\u2099 against k.");
+    const ku = K_UNITS[$("in-k-unit").value], k0 = num("in-kmin") * ku, k1 = num("in-kmax") * ku;
+    if (!(k0 > 0 && k1 > k0)) return alertMsg("Enter a range of k, smallest first.");
+    const g = wallGeom(), wp = wallParams(), w = { P: g.P, Aw: g.Aw, t: wp.t, kw: wp.kw, Sy: wp.Sy };
+    const Rfix = state.last ? state.last.p.R : p.R;
+    state.curveRfix = Rfix; state.curveWall = true;
+    for (let i = 0; i <= 30; i++) {
+      const k = k0 * (k1 / k0) ** (i / 30), R = radius(p, k);
+      curveRows.push({ x: k, R, Q: wallQmin({ ...p, k, R }, w, p.target, wp.T), qEach: NaN, feasible: true, Qfixed: wallQmin({ ...p, k, R: Rfix }, w, p.target, wp.T) });
+    }
+    drawCurve();
+    $("dlg-curve").showModal();
+    return;
+  }
+  state.curveWall = false;
   if (curveVar === "n") {
     const n0 = Math.max(1, Math.round(num("in-nmin"))), n1 = Math.round(num("in-nmax")), off = numL("in-offset");
     if (!(n1 > n0)) return alertMsg("Enter a range of numbers of wells, smallest first.");
@@ -1124,7 +1242,8 @@ function drawCurve() {
   svg.append("text").attr("class", "axis-title").attr("transform", `translate(16,${(m.t + H - m.b) / 2}) rotate(-90)`).attr("text-anchor", "middle").call((t) => { t.append("tspan").text("Q"); t.append("tspan").attr("baseline-shift", "sub").attr("font-size", "75%").text("min"); t.append("tspan").text(` (${unit})`); });
   $("curve-title").innerHTML = `Design curve: Q<sub>min</sub> vs. ${byK ? "hydraulic conductivity" : "number of wells"}`;
   const bad = curveRows.filter((r) => !r.feasible).map((r) => (byK ? fmtNum(xv(r)) : r.x));
-  $("curve-note").innerHTML = (byK ? `The ${state.wells.length} wells on the map, equal rates.${auto ? "" : " R is entered, so Q is proportional to k."}` : `Rings at ${$("in-offset").value} ${Ln()} from the edge, equal rates.`)
+  $("curve-note").innerHTML = state.curveWall ? `With the cutoff wall: Q<sub>min</sub> draws the water inside down in the days allowed and holds it. Nearly all the head is lost across the wall, so k and R matter little.`
+    : (byK ? `The ${state.wells.length} wells on the map, equal rates.${auto ? "" : " R is entered, so Q is proportional to k."}` : `Rings at ${$("in-offset").value} ${Ln()} from the edge, equal rates.`)
     + (bad.length ? ` Red points: Q<sub>min</sub> would pump a well dry (${byK ? `${bad.length} of ${curveRows.length} values of k, from ${bad[0]} to ${bad[bad.length - 1]} ${kUnitLabel()}` : `n = ${bad.join(", ")}`}).` : "");
 }
 $("btn-curve-csv").onclick = () => {
@@ -1153,7 +1272,7 @@ $("btn-export-contours").onclick = () => {
   download("contours.geojson", JSON.stringify(fc), "application/geo+json");
 };
 
-const INPUTS = ["in-R-method", "in-curve-var", "in-kmin", "in-kmax", "in-k", "in-k-unit", "in-ewt", "in-ebase", "in-eexc", "in-ereq", "in-R", "in-rw", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-Q", "in-Q-unit", "in-offset", "in-nwells", "in-field", "in-interval", "in-nmin", "in-nmax", "in-ramp"];
+const INPUTS = ["in-R-method", "in-curve-var", "in-kmin", "in-kmax", "in-k", "in-k-unit", "in-ewt", "in-ebase", "in-eexc", "in-ereq", "in-R", "in-rw", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-Q", "in-Q-unit", "in-offset", "in-nwells", "in-field", "in-interval", "in-nmin", "in-nmax", "in-ramp", "in-woff", "in-wthick", "in-kw", "in-kw-unit", "in-sy", "in-tdrain"];
 function project() {
   const f = excFeature();
   return {
@@ -1165,6 +1284,7 @@ function project() {
     lenUnit: lenUnit(),
     terrain: state.terrain,
     groundContours: $("in-gcont").checked,
+    wall: $("in-wall").checked,
     view: { center: map.getCenter(), zoom: map.getZoom() },
     section: state.section ? state.section.map((q) => [q.lat, q.lng]) : null,
   };
@@ -1177,7 +1297,8 @@ function restore(pr, fit = true) {
   // projects saved before the unit keys: k and Q units were stored as factors
   const legacy = { "in-k-unit": { "0.01": "cms", "1": "ms", "1.1574074074074074e-5": "mday", "3.5277777777777777e-6": "ftday" }, "in-Q-unit": { "1": "m3s", "0.001": "lps", "6.30902e-5": "gpm" } };
   Object.entries(pr.inputs || {}).forEach(([id, v]) => { if ($(id)) $(id).value = (legacy[id] && legacy[id][v]) || v; });
-  ["in-k-unit", "in-Q-unit"].forEach((id) => ($(id).dataset.prev = $(id).value));
+  ["in-k-unit", "in-Q-unit", "in-kw-unit"].forEach((id) => ($(id).dataset.prev = $(id).value));
+  $("in-wall").checked = !!pr.wall;
   // projects saved with heads above the low-k layer (H and the target head, with a ground height
   // in later versions) open as elevations with the datum at the low-k layer
   let md = pr.mode || "head";
