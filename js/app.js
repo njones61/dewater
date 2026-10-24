@@ -88,7 +88,7 @@ document.querySelectorAll('input[name="lenunit"]').forEach((r) => r.addEventList
   const f = LEN[lastLen] / Lf();
   LEN_INPUTS.forEach((id) => { const v = parseFloat($(id).value); if (Number.isFinite(v)) $(id).value = trim(v * f); });
   lastLen = lenUnit();
-  setLenLabels(); updateDerived(); updateExcInfo(); schedule();
+  setLenLabels(); updateDerived(); updateExcInfo(); showGroundRange(); drawGround(); schedule();
 }));
 for (const [id, units] of [["in-k", K_UNITS], ["in-Q", Q_UNITS]]) {
   const sel = $(`${id}-unit`);
@@ -260,7 +260,7 @@ function setExcavation(layer, fit = true) {
   state.excavation = layer;
   layer.setStyle(EXC_STYLE);
   layer.on("pm:edit pm:dragend pm:rotateend", () => { updateExcInfo(); refreshTerrain(); schedule(); });
-  layer.on("pm:remove", () => { state.excavation = null; updateExcInfo(); schedule(); });
+  layer.on("pm:remove", () => { state.excavation = null; updateExcInfo(); updateGroundRange(); schedule(); });
   setOrigin(layer.getBounds().getCenter());
   refreshTerrain();
   if (fit) map.fitBounds(layer.getBounds().pad(1.2));
@@ -309,7 +309,7 @@ $("btn-delete-exc").onclick = () => {
   map.removeLayer(state.excavation);
   state.excavation = null;
   $("btn-edit").textContent = "Edit"; $("btn-rotate").textContent = "Rotate"; tip(null);
-  updateExcInfo();
+  updateExcInfo(); updateGroundRange();
   schedule();
 };
 $("btn-rect").onclick = () => {
@@ -687,10 +687,11 @@ $("in-opacity").addEventListener("input", () => fill.setOpacity(parseFloat($("in
 // draws the actual ground. Off: the ground elevation is typed in (or left blank), and the
 // section shows level ground. The calculation treats the ground as level either way.
 state.terrain = false;
-async function readTerrain() {
+// The ground under the excavation (or the wells): lowest, highest, and average, in meters.
+async function groundStats() {
   const ring = excRing();
   const pts = ring || state.wells.map((w) => w.marker.getLatLng());
-  if (!pts.length) { alertMsg("Draw the excavation first."); return false; }
+  if (!pts.length) return null;
   if (!state.origin) setOrigin(L.latLngBounds(pts).getCenter());
   let sample;
   if (ring) {
@@ -698,11 +699,25 @@ async function readTerrain() {
     sample = grid([Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)], 15, 15).filter((q) => inside(q, r)).map(toLL);
     if (!sample.length) sample = ring;
   } else sample = pts;
+  const z = await elevations(sample);
+  return { mean: z.reduce((a, b) => a + b, 0) / z.length, lo: Math.min(...z), hi: Math.max(...z), ring: !!ring };
+}
+// The range stays under the ground elevation field, so the levels can be entered against it.
+let groundRange = null;
+async function updateGroundRange() {
+  try { groundRange = await groundStats(); } catch (_) { groundRange = null; }
+  showGroundRange();
+}
+function showGroundRange() {
+  const g = groundRange;
+  $("ground-range").textContent = g ? `Ground under the ${g.ring ? "excavation" : "wells"} (terrain data): ${fmt(g.lo / Lf(), 1)} to ${fmtL(g.hi, 1)}, average ${fmtL(g.mean, 1)}.` : "";
+}
+async function readTerrain() {
+  if (!excRing() && !state.wells.length) { alertMsg("Draw the excavation first."); return false; }
   try {
-    const z = await elevations(sample);
-    const mean = z.reduce((a, b) => a + b, 0) / z.length, lo = Math.min(...z), hi = Math.max(...z);
-    $("in-gelev").value = (mean / Lf()).toFixed(1);
-    tip(`Ground over the excavation: ${fmt(lo / Lf(), 1)} to ${fmtL(hi, 1)}, average ${fmtL(mean, 1)}.`, 5000);
+    const g = await groundStats();
+    groundRange = g; showGroundRange();
+    $("in-gelev").value = (g.mean / Lf()).toFixed(1);
     return true;
   } catch (e) {
     tip("Terrain data is unavailable right now. Enter the ground elevation by hand.", 4000);
@@ -720,7 +735,87 @@ async function setTerrain(on) {
 }
 $("in-terrain").addEventListener("change", () => setTerrain($("in-terrain").checked));
 // with terrain on, a new or reshaped excavation re-reads the ground under it
-function refreshTerrain() { if (state.terrain) readTerrain().then(() => { updateDerived(); schedule(); }); }
+function refreshTerrain() {
+  if (state.terrain) readTerrain().then(() => { updateDerived(); schedule(); });
+  else updateGroundRange();
+}
+
+// ------------------------------------------------------------------ ground contours
+// Dashed contours of the ground from the terrain tiles, for whatever the map shows, so a site's
+// elevations can be read before the levels are entered. Drawn only when zoomed in to building
+// scale: farther out the lines crowd and every pan loads many tiles.
+const groundPane = map.createPane("ground");
+groundPane.style.zIndex = 340;                // above the basemap, below the results
+groundPane.style.pointerEvents = "none";
+const groundLayer = L.layerGroup([], { pane: "ground" }).addTo(map);
+const GROUND_ZOOM = 15;
+let groundSeq = 0;
+async function drawGround() {
+  const seq = ++groundSeq;
+  const on = $("in-gcont").checked, near = map.getZoom() >= GROUND_ZOOM;
+  $("gcont-note").hidden = !on || near;
+  if (!on || !near) { groundLayer.clearLayers(); return; }
+  const b = map.getBounds(), n = 120;
+  const w = b.getWest(), e = b.getEast(), so = b.getSouth(), no = b.getNorth();
+  const pts = [];
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) pts.push({ lat: no - (no - so) * i / (n - 1), lng: w + (e - w) * j / (n - 1) });
+  let z;
+  try { z = await elevations(pts); } catch (_) { if (seq === groundSeq) groundLayer.clearLayers(); return; }
+  if (seq !== groundSeq) return;                // a newer view is on its way
+  const v = Array.from(z, (x) => x / Lf()), lo = d3.min(v), hi = d3.max(v);
+  groundLayer.clearLayers();
+  if (!(hi > lo)) return;
+  // about 8 to 25 lines across the view; every fifth line heavier and labeled
+  const step = [0.5, 1, 2, 5, 10, 20, 50, 100].find((s) => (hi - lo) / s <= 25) || 100;
+  const levels = d3.range(Math.ceil(lo / step) * step, hi, step);
+  const toLLc = ([cx, cy]) => L.latLng(no - (no - so) * (cy - 0.5) / (n - 1), w + (e - w) * (cx - 0.5) / (n - 1));
+  const onEdge = ([cx, cy]) => cx <= 0.5 || cx >= n - 0.5 || cy <= 0.5 || cy >= n - 0.5;
+  for (const c of d3.contours().size([n, n]).thresholds(levels)(v)) {
+    const major = Math.abs(c.value / (5 * step) - Math.round(c.value / (5 * step))) < 1e-6;
+    for (const poly of c.coordinates) for (const ring of poly) {
+      let seg = [];
+      const flush = () => {
+        if (seg.length > 2) {
+          const ll = seg.map(toLLc);
+          // a pale halo under the dashes, so they read over imagery as well as streets
+          L.polyline(ll, { pane: "ground", color: "#fff", weight: major ? 3.6 : 2.6, opacity: 0.55, interactive: false }).addTo(groundLayer);
+          L.polyline(ll, { pane: "ground", color: "#6b4e22", weight: major ? 1.8 : 1.2, opacity: 1, dashArray: major ? "8,4" : "4,4", interactive: false }).addTo(groundLayer);
+          if (major && seg.length > 10) {
+            L.tooltip({ permanent: true, direction: "center", className: "ground-label", interactive: false, pane: "ground" })
+              .setLatLng(ll[Math.floor(ll.length / 2)]).setContent(fmt(c.value, step < 1 ? 1 : 0)).addTo(groundLayer);
+          }
+        }
+        seg = [];
+      };
+      for (const q of ring) { if (onEdge(q)) flush(); else seg.push(q); }
+      flush();
+    }
+  }
+}
+let groundTimer = null;
+const scheduleGround = () => { clearTimeout(groundTimer); groundTimer = setTimeout(drawGround, 250); };
+map.on("moveend zoomend", scheduleGround);
+$("in-gcont").addEventListener("change", () => { drawGround(); persist(); });
+
+// The ground elevation under the pointer, from the same tiles.
+const PointerControl = L.Control.extend({
+  options: { position: "bottomleft" },
+  onAdd() { const d = L.DomUtil.create("div", "ground-readout"); d.hidden = true; return d; },
+});
+const pointer = new PointerControl().addTo(map);
+let ptrSeq = 0, ptrTimer = null;
+map.on("mousemove", (ev) => {
+  clearTimeout(ptrTimer);
+  ptrTimer = setTimeout(async () => {
+    const seq = ++ptrSeq, el = pointer.getContainer();
+    if (map.getZoom() < 10) { el.hidden = true; return; }
+    try {
+      const [z] = await elevations([ev.latlng]);
+      if (seq === ptrSeq) { el.textContent = `Ground ${fmtL(z, 1)}`; el.hidden = false; }
+    } catch (_) { el.hidden = true; }
+  }, 60);
+});
+map.on("mouseout", () => { clearTimeout(ptrTimer); ptrSeq++; pointer.getContainer().hidden = true; });
 
 // ------------------------------------------------------------------ cross section
 const secLayer = L.layerGroup().addTo(map);
@@ -1069,6 +1164,7 @@ function project() {
     mode: mode(),
     lenUnit: lenUnit(),
     terrain: state.terrain,
+    groundContours: $("in-gcont").checked,
     view: { center: map.getCenter(), zoom: map.getZoom() },
     section: state.section ? state.section.map((q) => [q.lat, q.lng]) : null,
   };
@@ -1104,6 +1200,7 @@ function restore(pr, fit = true) {
   if (!fit && pr.view) map.setView(pr.view.center, pr.view.zoom);
   if (pr.section) setSection(L.latLng(...pr.section[0]), L.latLng(...pr.section[1]));
   syncCurveInputs(); showR(); buildRampPicker();
+  $("in-gcont").checked = !!pr.groundContours; drawGround();
   if (pr.terrain) { state.terrain = true; $("in-terrain").checked = true; $("in-gelev").readOnly = true; schedule(); }
   schedule();
 }

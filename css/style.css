@@ -166,3 +166,12 @@ button.small { font-size: 12px; padding: 2px 8px; }
 .ramp-item .ramp-bar { width: 120px; height: 14px; }
 .ramp-item:hover { background: var(--bg); }
 .ramp-item.on { background: #e3eef7; }
+
+/* ground contours and the pointer readout */
+.ground-label { background: none; border: 0; box-shadow: none; color: #6b4e22; font-size: 11px; font-weight: 600; text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 2px #fff; padding: 0; }
+.ground-label::before { display: none; }
+.ground-readout { background: rgba(255,255,255,.9); border-radius: 4px; padding: 2px 7px; font-size: 12px; color: #5c4a1f; box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+.fields label.switch { flex-direction: row; align-items: center; justify-content: flex-start; gap: 6px; font-size: 13px; color: var(--ink); }
+.fields label.switch:has(input:checked) { color: #fff; }
+.switch.gcont { justify-self: start; height: 30px; }
+#ground-range:empty { display: none; }
