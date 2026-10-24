@@ -1,5 +1,5 @@
 // app.js — the map, the panel, and the drawing of results. The calculation is in model.js.
-import { heads, optimalRate, grid, inside, densify, wallCoeffs, wallLeak, wallOutside, wallSteady, wallDrainTime, wallQmin } from "./model.js";
+import { heads, optimalRate, timeToDewater, reach, grid, inside, densify, wallCoeffs, wallLeak, wallOutside, wallSteady, wallDrainTime, wallQmin, wallLevelAt } from "./model.js";
 import { elevations } from "./terrain.js";
 
 /* global L, turf, d3 */
@@ -137,6 +137,7 @@ function params() {
     Q: num("in-Q") * Qf(),
     site: null,
   };
+  if (flow() === "transient") { p.t = num("in-tdays") * 86400; p.Sy = num("in-sy"); }
   if (mode() === "depth") {
     const site = { dwt: numL("in-dwt"), dbase: numL("in-dbase"), dexc: numL("in-dexc"), margin: numL("in-margin") || 0, gelev: numL("in-gelev") };
     p.site = site;
@@ -148,7 +149,8 @@ function params() {
     p.H = ewt - ebase;
     p.target = ereq - ebase;
   }
-  if (p.Rmethod !== "entered") p.R = radius(p, p.k);
+  if (p.t !== undefined) p.R = reach(p);
+  else if (p.Rmethod !== "entered") p.R = radius(p, p.k);
   return p;
 }
 // The radius of influence from the empirical formulas (Bear 1979, p. 306), in meters with k in
@@ -167,6 +169,7 @@ function excArea() {
 }
 const rEquiv = () => Math.sqrt(excArea() / Math.PI);
 function radius(p, k) {
+  if (p.t !== undefined) return reach({ ...p, k });
   const s = p.H - p.target;
   if (p.Rmethod === "sichardt") return rEquiv() + 3000 * s * Math.sqrt(k);
   if (p.Rmethod === "kusakin") return rEquiv() + 575 * s * Math.sqrt(p.H * k);
@@ -179,11 +182,34 @@ function optimalWithR(cp, wells, p, k = p.k) {
 }
 function showR() {
   const p = params(), auto = p.Rmethod !== "entered";
+  if (p.t !== undefined) return;
   $("in-R").readOnly = auto;
   $("R-note").hidden = !auto;
   if (auto && Number.isFinite(p.R)) $("in-R").value = trim(p.R / Lf());
 }
 $("in-R-method").addEventListener("change", () => { showR(); schedule(); });
+
+// Steady flow uses a radius of influence; transient flow uses the specific yield and the time
+// pumping (Theis), and the slider runs the time from 0.1 to 1000 days on a log scale.
+const flow = () => document.querySelector('input[name="flow"]:checked').value;
+function showFlow() {
+  const tr = flow() === "transient";
+  $("R-method-field").hidden = tr; $("R-field").hidden = tr;
+  $("R-note").hidden = tr || $("in-R-method").value === "entered";
+  ["tdays-field", "tslide-field", "t-note"].forEach((id) => ($(id).hidden = !tr));
+  $("sy-field").hidden = !(tr || $("in-wall").checked);
+  $("tdrain-field").hidden = tr;
+  syncSlider();
+}
+const slideToDays = (v) => 10 ** (-1 + 4 * v / 1000);
+function syncSlider() { const d = num("in-tdays"); if (d > 0) $("in-tslide").value = Math.round((Math.log10(d) + 1) * 250); }
+document.querySelectorAll('input[name="flow"]').forEach((r) => r.addEventListener("change", () => { showFlow(); showR(); updateDerived(); schedule(); }));
+$("in-tslide").addEventListener("input", () => {
+  const d = slideToDays(+$("in-tslide").value);
+  $("in-tdays").value = trim(+d.toPrecision(d < 10 ? 2 : 3));
+  updateDerived(); schedule(60);
+});
+$("in-tdays").addEventListener("input", syncSlider);
 
 function updateDerived() {
   showR();
@@ -195,6 +221,8 @@ function updateDerived() {
     $("derived").textContent = `Saturated thickness H = ${fmtL(p.H, 2)}. The water must come down to ${fmtL(s.dexc + s.margin, 2)} below ground: a head of ${fmtL(p.target, 2)} above the low-k layer.`
       + (Number.isFinite(s.gelev) ? ` Water table at elevation ${fmt((s.gelev - s.dwt) / Lf(), 2)}; required level ${fmt((s.gelev - s.dexc - s.margin) / Lf(), 2)}.` : "");
   } else $("derived").textContent = "";
+  if (p.t !== undefined && p.t > 0 && p.Sy > 0 && p.k > 0 && p.H > 0)
+    $("derived").textContent += ` After ${fmtNum(p.t / 86400)} days the drawdown spreads to about 1.5√(kHt/Sᵧ) = ${fmtL(p.R, 0)} from each well.`;
 }
 // Switching how the levels are entered carries the site over, so the design stays the same.
 function carryLevels() {
@@ -247,8 +275,14 @@ function checkParams(p) {
     if (!(st.dexc + st.margin > st.dwt)) return "The excavation stays above the water table: no dewatering is needed.";
   }
   if (!(p.H > 0)) return "Enter a saturated thickness H greater than zero.";
-  if (!(p.R > 0)) return "Enter a radius of influence R greater than zero.";
-  if (!(p.rw > 0) || p.rw >= p.R) return "The well radius must be greater than zero and less than R.";
+  if (p.t !== undefined) {
+    if (!(p.t > 0)) return "Enter the days of pumping, greater than zero.";
+    if (!(p.Sy > 0 && p.Sy <= 1)) return "Enter a specific yield between 0 and 1.";
+    if (!(p.rw > 0)) return "Enter a well radius greater than zero.";
+  } else {
+    if (!(p.R > 0)) return "Enter a radius of influence R greater than zero.";
+    if (!(p.rw > 0) || p.rw >= p.R) return "The well radius must be greater than zero and less than R.";
+  }
   if (!(p.target >= 0) || p.target >= p.H) return "The target head must be at least zero and less than H.";
   if (!(p.Q >= 0)) return "Enter a pumping rate of zero or more.";
   if (wallOn()) {
@@ -439,7 +473,7 @@ $("btn-generate").onclick = () => {
 // (model.js has the leakage, the steady level inside, and the drain-down time).
 const wallOn = () => $("in-wall").checked && !!state.excavation;
 function wallParams() {
-  const T = num("in-tdrain");
+  const T = flow() === "transient" ? num("in-tdays") : num("in-tdrain");
   return { t: numL("in-wthick"), kw: num("in-kw") * K_UNITS[$("in-kw-unit").value], Sy: num("in-sy"), T: Number.isFinite(T) ? T * 86400 : 0 };
 }
 function polyArea(r) {
@@ -530,7 +564,7 @@ function wallGeom() {
   ring.forEach((q, i) => { const r2 = ring[(i + 1) % ring.length]; P += Math.hypot(r2.x - q.x, r2.y - q.y); });
   return { ringLL, ring, P, Aw: polyArea(ring) };
 }
-$("in-wall").addEventListener("change", () => { if ($("in-wall").checked) $("wall-box").open = true; showWallSrc(); schedule(); });
+$("in-wall").addEventListener("change", () => { if ($("in-wall").checked) $("wall-box").open = true; showWallSrc(); showFlow(); schedule(); });
 
 // ------------------------------------------------------------------ analysis
 let timer = null;
@@ -580,9 +614,9 @@ function run() {
   const { h } = heads(G, W, p);
 
   // the excavation: the highest head inside it
-  let hmax = null, at = null;
+  let hmax = null, at = null, cp = null;
   if (ring) {
-    const cp = checkPoints(ring);
+    cp = checkPoints(ring);
     const hc = heads(cp, W, p).h;
     hmax = -Infinity;
     hc.forEach((v, i) => { if (v > hmax) { hmax = v; at = cp[i]; } });
@@ -618,7 +652,12 @@ function run() {
     rows.push(["Target head", fmtL(p.target, 2)]);
     rows.push(["Margin (target − highest)", fmtL(p.target - hmax, 2)]);
   }
-  if (p.Rmethod !== "entered") {
+  const tr = p.t !== undefined, tDew = tr && ring ? timeToDewater(cp, wells, p, p.target, p.Q) : NaN;
+  if (tr) {
+    rows.push(["Days of pumping, t", fmtNum(p.t / 86400)]);
+    if (ring) rows.push(["Time to dewater at Q", Number.isFinite(tDew) ? fmtDays(tDew) : "more than 10 years"]);
+    rows.push(["Spread of the drawdown, 1.5√(kHt/S<sub>y</sub>)", fmtL(p.R, 0)]);
+  } else if (p.Rmethod !== "entered") {
     rows.push(["Equivalent radius, √(A/π)", fmtL(rEquiv(), 1)]);
     rows.push(["R from the formula", fmtL(p.R, 0)]);
   }
@@ -630,12 +669,15 @@ function run() {
     setStatus("idle", "Draw or load the excavation to check the design.");
   } else if (state.optQ && Math.abs(p.Q - state.optQ) <= 1e-5 * state.optQ && Math.abs(hmax - p.target) < 1e-3) {
     // still the minimum design pumping rate found (in whatever units it is now shown)
-    setStatus("ok", `Minimum design pumping rate: ${fmtQ(state.optQ)}. The highest water in the excavation is exactly at the required level.${state.optNote || ""}`);
+    setStatus("ok", tr ? `Minimum design pumping rate: ${fmtQ(state.optQ)}. On day ${fmtNum(p.t / 86400)} the highest water in the excavation reaches the required level, and it keeps falling after that.`
+      : `Minimum design pumping rate: ${fmtQ(state.optQ)}. The highest water in the excavation is exactly at the required level.${state.optNote || ""}`);
   } else if (hmax <= p.target) {
-    setStatus("ok", st ? `Dewatered: the water is at least ${fmtL(st.dbase - hmax - st.dexc, 2)} below the excavation bottom everywhere inside it.`
-      : `Dewatered: the water is at or below the target head everywhere in the excavation.`);
+    const by = tr ? ` by day ${fmtNum(p.t / 86400)} (it got there in ${fmtDays(tDew)})` : "";
+    setStatus("ok", st ? `Dewatered${by}: the water is at least ${fmtL(st.dbase - hmax - st.dexc, 2)} below the excavation bottom everywhere inside it.`
+      : `Dewatered${by}: the water is at or below the target head everywhere in the excavation.`);
   } else {
-    setStatus("warn", `Not dewatered: the water is ${fmtL(hmax - p.target, 2)} above the required level at the marked point.`);
+    const when = tr ? ` on day ${fmtNum(p.t / 86400)}. ${Number.isFinite(tDew) ? `At this rate it gets there in ${fmtDays(tDew)}.` : "At this rate it doesn't get there within 10 years."}` : " at the marked point.";
+    setStatus("warn", `Not dewatered: the water is ${fmtL(hmax - p.target, 2)} above the required level${when}`);
   }
 }
 
@@ -651,8 +693,11 @@ function runWall(p, ring, wells) {
   else if (state.wall) state.wall.bringToFront();
   if (!ring.every((q) => inside(q, g.ring)) || g.ring.some((q) => inside(q, ring))) return setStatus("bad", "The cutoff wall must enclose the excavation.");
   const w = { P: g.P, Aw: g.Aw, t: wp.t, kw: wp.kw, Sy: wp.Sy };
-  const leakT = wallLeak(p.target, p, w);
-  const hHold = Math.max(wallSteady(p.Q, p, w), p.target);
+  const leakT = wallLeak(p.target, p, w), tr = p.t !== undefined;
+  const tDrain = wallDrainTime(p.Q, p, w, p.target);
+  // in transient flow, the water inside on day t: still coming down if the drain time is longer
+  const early = tr && tDrain > p.t;
+  const hHold = early ? wallLevelAt(p.Q, p, w, p.t) : Math.max(wallSteady(p.Q, p, w), p.target);
   const leak = wallLeak(hHold, p, w), hOut = wallOutside(hHold, p, w);
   const sp = Math.max(g.P / 600, 0.5);
   const sinks = densify(g.ring, sp), S = sinks.map((q) => ({ ...q, q: leak / sinks.length })), pOut = { ...p, rw: sp / 2 };
@@ -669,7 +714,7 @@ function runWall(p, ring, wells) {
 
   const st = p.site;
   const lvl = (z) => (st && st.elev ? `elevation ${fmt((st.gelev - st.dbase + z) / Lf(), 2)}` : st ? `${fmtL(st.dbase - z, 2)} below ground` : `h = ${fmtL(z, 2)}`);
-  const tDrain = wallDrainTime(p.Q, p, w, p.target), days = (t) => (Number.isFinite(t) ? `${fmt(t / 86400, t < 10 * 86400 ? 1 : 0)} days` : "an unlimited time");
+  const days = (t) => (Number.isFinite(t) ? fmtDays(t) : "an unlimited time");
   const V = w.Sy * w.Aw * (p.H - p.target), outside = wells.filter((q) => !inside(q, g.ring)).length;
   const rows = [
     ["Wall length, P", fmtL(g.P, 0)],
@@ -680,11 +725,14 @@ function runWall(p, ring, wells) {
     ["Time to draw down at Q", Number.isFinite(tDrain) ? days(tDrain) : "never: Q is less than the leakage"],
   ];
   if (n) rows.push(["Wells", `${n}${outside ? ` (${outside} outside the wall)` : ""}`], ["Rate per well", fmtQ(qEach)]);
-  rows.push(["Water inside the wall", lvl(hHold)], ["Water at the wall's outside face", lvl(hOut)]);
-  if (p.Rmethod !== "entered") rows.push(["Equivalent radius, √(A/π)", fmtL(rEquiv(), 1)], ["R from the formula", fmtL(p.R, 0)]);
+  rows.push([tr ? `Water inside the wall on day ${fmtNum(p.t / 86400)}` : "Water inside the wall", lvl(hHold)], ["Water at the wall's outside face", lvl(hOut)]);
+  if (p.t !== undefined) rows.push(["Spread of the drawdown outside, 1.5√(kHt/S<sub>y</sub>)", fmtL(p.R, 0)]);
+  else if (p.Rmethod !== "entered") rows.push(["Equivalent radius, √(A/π)", fmtL(rEquiv(), 1)], ["R from the formula", fmtL(p.R, 0)]);
   $("results").innerHTML = rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("");
   const where = outside ? ` ${outside} well${outside > 1 ? "s are" : " is"} outside the wall: move ${outside > 1 ? "them" : "it"} inside.` : "";
-  if (hHold > p.target + 1e-9) {
+  if (early && Number.isFinite(tDrain)) {
+    setStatus("warn", `Not dewatered by day ${fmtNum(p.t / 86400)}: the water inside the wall is ${fmtL(hHold - p.target, 2)} above the required level. At this rate it gets there in ${days(tDrain)}.${where}`);
+  } else if (hHold > p.target + 1e-9 || !Number.isFinite(tDrain)) {
     setStatus("warn", `Not dewatered: at this rate the water inside the wall levels off ${fmtL(hHold - p.target, 2)} above the required level. Q must be more than the leakage, ${fmtQ(leakT)}.${where}`);
   } else if (state.optQ && Math.abs(p.Q - state.optQ) <= 1e-5 * state.optQ) {
     setStatus(outside ? "warn" : "ok", `Minimum design pumping rate: ${fmtQ(state.optQ)}. ${wp.T > 0 ? `It draws the water inside the wall down to the required level in ${days(wp.T)}; then` : "It holds the water inside the wall at the required level once it is drawn down;"} the wells need only the leakage through the wall, ${fmtQ(leakT)}.${where}`);
@@ -850,7 +898,7 @@ buildRampPicker();
 
 ["in-field", "in-interval", "in-fill", "in-dewatered", "in-ramp", "in-ramp-rev"].forEach((id) => $(id).addEventListener("change", () => { drawResults(); persist(); }));
 $("in-opacity").addEventListener("input", () => fill.setOpacity(parseFloat($("in-opacity").value)));
-["in-k", "in-k-unit", "in-ewt", "in-ebase", "in-eexc", "in-ereq", "in-R", "in-rw", "in-Q", "in-Q-unit", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-woff", "in-wthick", "in-kw", "in-kw-unit", "in-sy", "in-tdrain"]
+["in-k", "in-k-unit", "in-ewt", "in-ebase", "in-eexc", "in-ereq", "in-R", "in-rw", "in-Q", "in-Q-unit", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-woff", "in-wthick", "in-kw", "in-kw-unit", "in-sy", "in-tdrain", "in-tdays"]
   .forEach((id) => $(id).addEventListener("input", () => { updateDerived(); schedule(250); }));
 
 // ------------------------------------------------------------------ terrain
@@ -1214,7 +1262,8 @@ $("btn-optimize").onclick = () => {
     const qv = Q / Qf(), mag = 10 ** (Math.floor(Math.log10(qv)) - 5);
     $("in-Q").value = trim(Math.ceil(qv / mag) * mag);
     state.optQ = +$("in-Q").value * Qf();
-    return run();
+    run(); persist();
+    return;
   }
   if (!ring || !state.wells.length) return setStatus("idle", "Finding Q\u2098\u1d62\u2099 needs an excavation and wells.");
   const r = ring.map(toXY), wells = state.wells.map((w) => toXY(w.marker.getLatLng()));
@@ -1225,7 +1274,7 @@ $("btn-optimize").onclick = () => {
   const qv = opt.Q / Qf(), mag = 10 ** (Math.floor(Math.log10(qv)) - 5);
   $("in-Q").value = trim(Math.ceil(qv / mag) * mag);
   state.optQ = opt.feasible ? opt.Q : null;
-  run();
+  run(); persist();
   if (!opt.feasible) setStatus("bad", "The minimum design pumping rate would pump a well dry. Add wells, or move them farther out.");
 };
 
@@ -1237,9 +1286,10 @@ let curveRows = [], curveVar = "n";
 const kUnitLabel = () => $("in-k-unit").selectedOptions[0].textContent;
 function syncCurveInputs() {
   const v = $("in-curve-var").value;
-  $("curve-n").hidden = v !== "n"; $("curve-k").hidden = v !== "k";
+  $("curve-n").hidden = v !== "n"; $("curve-k").hidden = v !== "k"; $("curve-t").hidden = v !== "t";
   document.querySelectorAll(".uK").forEach((e) => (e.textContent = kUnitLabel()));
   $("curve-hint").textContent = v === "n" ? "Past some n, more wells barely lower Q."
+    : v === "t" ? "For the wells on the map (or the cutoff wall), with transient flow: the less time allowed, the more pumping."
     : "For the wells on the map. With R entered, Q is simply proportional to k; choose Sichardt or Kusakin for R to see how R's growth with k changes that.";
 }
 $("in-curve-var").addEventListener("change", syncCurveInputs);
@@ -1250,8 +1300,26 @@ $("btn-curve").onclick = () => {
   const cp = checkPoints(excRing().map(toXY));
   curveVar = $("in-curve-var").value;
   curveRows = [];
+  if (curveVar === "t") {
+    const t0 = num("in-tmin") * 86400, t1 = num("in-tmax") * 86400;
+    if (!(t0 > 0 && t1 > t0)) return alertMsg("Enter a range of days, smallest first.");
+    if (!wallOn() && p.t === undefined) return alertMsg("Q\u2098\u1d62\u2099 against time needs transient flow (step 2) or a cutoff wall.");
+    if (!wallOn() && !state.wells.length) return alertMsg("Place or generate the wells first.");
+    const g = wallOn() ? wallGeom() : null, wp = wallParams();
+    if (wallOn() && !g) return alertMsg("Draw or load the cutoff wall first.");
+    const wells = state.wells.map((w) => toXY(w.marker.getLatLng()));
+    state.curveWall = wallOn();
+    for (let i = 0; i <= 30; i++) {
+      const t = t0 * (t1 / t0) ** (i / 30), pt = p.t === undefined ? p : { ...p, t, R: reach({ ...p, t }) };
+      if (g) curveRows.push({ x: t, Q: wallQmin(pt, { P: g.P, Aw: g.Aw, t: wp.t, kw: wp.kw, Sy: wp.Sy }, p.target, t), feasible: true });
+      else { const o = optimalRate(cp, wells, pt, p.target); curveRows.push({ x: t, Q: o.Q, qEach: o.qEach, feasible: o.feasible }); }
+    }
+    drawCurve();
+    $("dlg-curve").showModal();
+    return;
+  }
   if (wallOn()) {
-    if (curveVar === "n") return alertMsg("With a cutoff wall, Q\u2098\u1d62\u2099 doesn't depend on the number of wells. Try Q\u2098\u1d62\u2099 against k.");
+    if (curveVar === "n") return alertMsg("With a cutoff wall, Q\u2098\u1d62\u2099 doesn't depend on the number of wells. Try Q\u2098\u1d62\u2099 against k or the days of pumping.");
     const ku = K_UNITS[$("in-k-unit").value], k0 = num("in-kmin") * ku, k1 = num("in-kmax") * ku;
     if (!(k0 > 0 && k1 > k0)) return alertMsg("Enter a range of k, smallest first.");
     const g = wallGeom(), wp = wallParams();
@@ -1295,21 +1363,23 @@ $("btn-curve").onclick = () => {
   $("dlg-curve").showModal();
 };
 function drawCurve() {
-  const uq = Qf(), unit = Qn(), byK = curveVar === "k", ku = K_UNITS[$("in-k-unit").value];
-  const auto = byK && params().Rmethod !== "entered";
+  const uq = Qf(), unit = Qn(), byK = curveVar === "k", byT = curveVar === "t", ku = K_UNITS[$("in-k-unit").value];
+  const tr = flow() === "transient", auto = byK && !tr && params().Rmethod !== "entered", logX = byK || byT;
   const el = $("curve-chart");
   el.innerHTML = "";
   const W = Math.min(720, window.innerWidth * 0.9), H = 360, m = { l: 70, r: 20, t: 14, b: 46 };
-  const ok = curveRows.filter((r) => isFinite(r.Q));
-  const xv = (r) => (byK ? r.x / ku : r.x);
-  const x = (byK ? d3.scaleLog() : d3.scaleLinear()).domain(d3.extent(ok, xv)).range([m.l, W - m.r]);
+  // against time, the rates that would pump a well dry soar at short times and are left off
+  const fin = curveRows.filter((r) => isFinite(r.Q)), feas = fin.filter((r) => r.feasible), dropDry = byT && feas.length >= 2 && feas.length < fin.length;
+  const ok = dropDry ? feas : fin;
+  const xv = (r) => (byK ? r.x / ku : byT ? r.x / 86400 : r.x);
+  const x = (logX ? d3.scaleLog() : d3.scaleLinear()).domain(d3.extent(ok, xv)).range([m.l, W - m.r]);
   const ys = ok.flatMap((r) => (auto ? [r.Q, r.Qfixed] : [r.Q]).map((q) => q / uq));
   const lo = d3.min(ys), hi = d3.max(ys);
-  const y = byK ? d3.scaleLog().domain([lo / 1.1, hi * 1.1]).range([H - m.b, m.t])
+  const y = logX ? d3.scaleLog().domain([lo / 1.1, hi * 1.1]).range([H - m.b, m.t])
     : d3.scaleLinear().domain([Math.max(0, lo - 0.1 * (hi - lo || lo)), hi + 0.05 * (hi - lo || lo)]).nice().range([H - m.b, m.t]);
   const svg = d3.select(el).append("svg").attr("class", "chart").attr("width", W).attr("height", H);
-  svg.append("g").attr("transform", `translate(0,${H - m.b})`).call(byK ? d3.axisBottom(x).ticks(6, "~g") : d3.axisBottom(x).ticks(10).tickFormat(d3.format("d")));
-  svg.append("g").attr("transform", `translate(${m.l},0)`).call(byK ? d3.axisLeft(y).ticks(6, "~g") : d3.axisLeft(y).ticks(8));
+  svg.append("g").attr("transform", `translate(0,${H - m.b})`).call(logX ? d3.axisBottom(x).ticks(6, "~g") : d3.axisBottom(x).ticks(10).tickFormat(d3.format("d")));
+  svg.append("g").attr("transform", `translate(${m.l},0)`).call(logX ? d3.axisLeft(y).ticks(6, "~g") : d3.axisLeft(y).ticks(8));
   svg.append("g").attr("stroke", "#e5eaef").selectAll("line").data(y.ticks(8)).join("line")
     .attr("x1", m.l).attr("x2", W - m.r).attr("y1", (d) => y(d)).attr("y2", (d) => y(d));
   if (auto) {
@@ -1320,7 +1390,7 @@ function drawCurve() {
     .attr("d", d3.line().x((r) => x(xv(r))).y((r) => y(r.Q / uq)));
   svg.append("g").selectAll("circle").data(ok).join("circle").attr("cx", (r) => x(xv(r))).attr("cy", (r) => y(r.Q / uq)).attr("r", 3.5)
     .attr("fill", (r) => (r.feasible ? "#1F4E79" : "#b3261e"))
-    .append("title").text((r) => `${byK ? `k = ${fmtNum(xv(r))} ${kUnitLabel()}, R = ${fmtL(r.R, 0)}` : `${r.x} wells`}: Q = ${fmtNum(r.Q / uq)} ${unit}${r.feasible ? "" : " (a well runs dry)"}`);
+    .append("title").text((r) => `${byK ? `k = ${fmtNum(xv(r))} ${kUnitLabel()}${tr ? "" : `, R = ${fmtL(r.R, 0)}`}` : byT ? `${fmtNum(xv(r))} days` : `${r.x} wells`}: Q = ${fmtNum(r.Q / uq)} ${unit}${r.feasible ? "" : " (a well runs dry)"}`);
   if (auto) {
     const lg = svg.append("g").attr("transform", `translate(${m.l + 12},${m.t + 8})`);
     [["#1F4E79", "", `R from ${params().Rmethod === "sichardt" ? "Sichardt" : "Kusakin"} (grows with √k)`], ["#8a96a3", "6,4", `R fixed at ${fmtL(state.curveRfix, 0)}`]].forEach(([c, dash, t], i) => {
@@ -1328,17 +1398,21 @@ function drawCurve() {
       lg.append("text").attr("x", 32).attr("y", i * 18 + 4).text(t);
     });
   }
-  svg.append("text").attr("class", "axis-title").attr("x", (m.l + W - m.r) / 2).attr("y", H - 8).attr("text-anchor", "middle").text(byK ? `Hydraulic conductivity, k (${kUnitLabel()})` : "Number of wells, n");
+  svg.append("text").attr("class", "axis-title").attr("x", (m.l + W - m.r) / 2).attr("y", H - 8).attr("text-anchor", "middle").text(byK ? `Hydraulic conductivity, k (${kUnitLabel()})` : byT ? "Days of pumping, t" : "Number of wells, n");
   svg.append("text").attr("class", "axis-title").attr("transform", `translate(16,${(m.t + H - m.b) / 2}) rotate(-90)`).attr("text-anchor", "middle").call((t) => { t.append("tspan").text("Q"); t.append("tspan").attr("baseline-shift", "sub").attr("font-size", "75%").text("min"); t.append("tspan").text(` (${unit})`); });
-  $("curve-title").innerHTML = `Design curve: Q<sub>min</sub> vs. ${byK ? "hydraulic conductivity" : "number of wells"}`;
-  const bad = curveRows.filter((r) => !r.feasible).map((r) => (byK ? fmtNum(xv(r)) : r.x));
-  $("curve-note").innerHTML = state.curveWall ? `With the cutoff wall: Q<sub>min</sub> draws the water inside down in the days allowed and holds it. Nearly all the head is lost across the wall, so k and R matter little.`
-    : (byK ? `The ${state.wells.length} wells on the map, equal rates.${auto ? "" : " R is entered, so Q is proportional to k."}` : `Rings at ${$("in-offset").value} ${Ln()} from the edge, equal rates.`)
-    + (bad.length ? ` Red points: Q<sub>min</sub> would pump a well dry (${byK ? `${bad.length} of ${curveRows.length} values of k, from ${bad[0]} to ${bad[bad.length - 1]} ${kUnitLabel()}` : `n = ${bad.join(", ")}`}).` : "");
+  $("curve-title").innerHTML = `Design curve: Q<sub>min</sub> vs. ${byK ? "hydraulic conductivity" : byT ? "days of pumping" : "number of wells"}`;
+  const bad = curveRows.filter((r) => !r.feasible).map((r) => (logX ? fmtNum(xv(r)) : r.x));
+  $("curve-note").innerHTML = (state.curveWall ? (byT ? `With the cutoff wall: Q<sub>min</sub> draws the water inside down in the days allowed and then holds it. With much time, it falls to the leakage through the wall.`
+      : `With the cutoff wall: Q<sub>min</sub> draws the water inside down in the days allowed and holds it. Nearly all the head is lost across the wall, so k and R matter little.`)
+    : byT ? `The ${state.wells.length} wells on the map, equal rates, transient flow: Q<sub>min</sub> dewaters the excavation by day t. The water keeps falling after that.`
+    : (byK ? `The ${state.wells.length} wells on the map, equal rates.${tr ? ` Transient flow, day ${fmtNum(num("in-tdays"))}: Q grows more slowly than k, because the drawdown spreads farther in more permeable ground.` : auto ? "" : " R is entered, so Q is proportional to k."}` : `Rings at ${$("in-offset").value} ${Ln()} from the edge, equal rates.`))
+    + (dropDry ? ` Before day ${bad[bad.length - 1]}, Q<sub>min</sub> would pump a well dry (${bad.length} of ${curveRows.length} times); those are left off the plot.`
+      : bad.length ? ` Red points: Q<sub>min</sub> would pump a well dry (${byK ? `${bad.length} of ${curveRows.length} values of k, from ${bad[0]} to ${bad[bad.length - 1]} ${kUnitLabel()}` : byT ? `${bad.length} of ${curveRows.length} times, from day ${bad[0]} to day ${bad[bad.length - 1]}` : `n = ${bad.join(", ")}`}).` : "");
 }
 $("btn-curve-csv").onclick = () => {
   const u = Qn().replace("³", "3").replace("/", "_per_"), ku = K_UNITS[$("in-k-unit").value], kn = kUnitLabel().replace("/", "_per_");
-  const csv = curveVar === "k"
+  const csv = curveVar === "t" ? `days,Q_min_${u},feasible\n` + curveRows.map((r) => `${trim(r.x / 86400)},${trim(r.Q / Qf())},${r.feasible}`).join("\n")
+    : curveVar === "k"
     ? `k_${kn},R_${Ln()},Q_min_${u},Q_min_R_fixed_${u},feasible\n` + curveRows.map((r) => `${trim(r.x / ku)},${trim(r.R / Lf())},${trim(r.Q / Qf())},${trim(r.Qfixed / Qf())},${r.feasible}`).join("\n")
     : `wells,Q_min_${u},q_per_well_${u},feasible\n` + curveRows.map((r) => `${r.x},${trim(r.Q / Qf())},${trim(r.qEach / Qf())},${r.feasible}`).join("\n");
   download("design_curve.csv", csv, "text/csv");
@@ -1362,7 +1436,7 @@ $("btn-export-contours").onclick = () => {
   download("contours.geojson", JSON.stringify(fc), "application/geo+json");
 };
 
-const INPUTS = ["in-R-method", "in-curve-var", "in-kmin", "in-kmax", "in-k", "in-k-unit", "in-ewt", "in-ebase", "in-eexc", "in-ereq", "in-R", "in-rw", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-Q", "in-Q-unit", "in-offset", "in-nwells", "in-field", "in-interval", "in-nmin", "in-nmax", "in-ramp", "in-woff", "in-wthick", "in-kw", "in-kw-unit", "in-sy", "in-tdrain"];
+const INPUTS = ["in-R-method", "in-curve-var", "in-kmin", "in-kmax", "in-k", "in-k-unit", "in-ewt", "in-ebase", "in-eexc", "in-ereq", "in-R", "in-rw", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-Q", "in-Q-unit", "in-offset", "in-nwells", "in-field", "in-interval", "in-nmin", "in-nmax", "in-ramp", "in-woff", "in-wthick", "in-kw", "in-kw-unit", "in-sy", "in-tdrain", "in-tdays", "in-tmin", "in-tmax"];
 function project() {
   const f = excFeature();
   return {
@@ -1374,6 +1448,7 @@ function project() {
     lenUnit: lenUnit(),
     terrain: state.terrain,
     groundContours: $("in-gcont").checked,
+    flow: flow(),
     wall: $("in-wall").checked,
     wallSrc: wallSrc(),
     wallRing: state.wall ? (() => { let ll = state.wall.getLatLngs(); while (Array.isArray(ll[0])) ll = ll[0]; return ll.map((q) => [q.lat, q.lng]); })() : null,
@@ -1396,6 +1471,9 @@ function restore(pr, fit = true) {
   if (state.wall) { map.removeLayer(state.wall); state.wall = null; }
   if (pr.wallRing) setWall(L.polygon(pr.wallRing));
   showWallSrc();
+  const fl = document.querySelector(`input[name="flow"][value="${pr.flow || "steady"}"]`);
+  if (fl) fl.checked = true;
+  showFlow();
   // projects saved with heads above the low-k layer (H and the target head, with a ground height
   // in later versions) open as elevations with the datum at the low-k layer
   let md = pr.mode || "head";
@@ -1457,6 +1535,7 @@ function fmt(v, d) {
   if (Math.abs(v) < 0.5 * 10 ** -d) v = 0;           // no "-0.00"
   return v.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
 }
+function fmtDays(t) { const d = t / 86400; return `${fmt(d, d < 10 ? 1 : 0)} day${fmt(d, d < 10 ? 1 : 0) === "1" ? "" : "s"}`; }
 function fmtNum(v) { return Number.isFinite(v) ? +v.toPrecision(4) : "—"; }
 function fmtQ(q) { return `${fmtNum(q / Qf())} ${Qn()}`; }
 // A chart's SVG as a PNG at twice its size, on white, with the page's chart fonts.
@@ -1510,6 +1589,7 @@ try {
   const saved = JSON.parse(localStorage.getItem("dewater:last") || "null");
   if (saved && (saved.excavation || (saved.wells || []).length)) restore(saved, false);
 } catch (e) { /* first visit, or storage unavailable */ }
+showFlow();
 updateExcInfo();
 updateWellsInfo();
 updateDerived();

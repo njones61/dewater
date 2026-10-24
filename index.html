@@ -86,17 +86,27 @@
           <label class="span2">Hydraulic conductivity, k
             <span class="pair"><input id="in-k" type="number" step="any" value="5e-4">
               <select id="in-k-unit"><option value="cms" selected>cm/s</option><option value="ms">m/s</option><option value="mday">m/day</option><option value="fts">ft/s</option><option value="ftday">ft/day</option><option value="gpdft2">gal/day/ft²</option></select></span></label>
-          <label class="span2">Radius of influence, R
+          <div class="seg span2" role="radiogroup" aria-label="Steady or transient flow">
+            <label><input type="radio" name="flow" value="steady" checked> Steady</label>
+            <label><input type="radio" name="flow" value="transient"> Transient</label>
+          </div>
+          <label class="span2" id="R-method-field">Radius of influence, R
             <select id="in-R-method">
               <option value="entered" selected>Entered</option>
               <option value="sichardt">Sichardt: R = rₑ + 3000 s √k</option>
               <option value="kusakin">Kusakin: R = rₑ + 575 s √(Hk)</option>
             </select></label>
-          <label><span>R (<span class="uL">m</span>)</span><input id="in-R" type="number" step="any" value="500"></label>
+          <label id="R-field"><span>R (<span class="uL">m</span>)</span><input id="in-R" type="number" step="any" value="500"></label>
+          <label id="tdays-field" hidden>Days of pumping, t<input id="in-tdays" type="number" step="any" min="0" value="30"></label>
+          <label id="sy-field" hidden><span>Specific yield, S<sub>y</sub></span><input id="in-sy" type="number" step="any" value="0.2"></label>
           <label><span>Well radius, r<sub>w</sub> (<span class="uL">m</span>)</span><input id="in-rw" type="number" step="any" value="0.15"></label>
           <p class="hint span2" id="R-note" hidden>Empirical, in meters with k in m/s (Bear 1979, p. 306). The
             wells are treated as one large well of the excavation's equivalent radius, r<sub>e</sub> = √(A/π),
             drawn down by s, the drawdown the excavation needs; R is measured from its center.</p>
+          <label class="range span2" id="tslide-field" hidden>Time<input id="in-tslide" type="range" min="0" max="1000" step="1" value="620"></label>
+          <p class="hint span2" id="t-note" hidden>The wells start pumping at t = 0 (the Theis solution).
+            Q<sub>min</sub> is the smallest rate that dewaters the excavation by day t; the water keeps
+            falling after that. Drag the slider to watch the water come down.</p>
         </div>
         <p class="hint">The aquifer sits on a low-permeability layer, and the ground and the water
           table start out level. The water must come down to the excavation bottom, plus any extra
@@ -145,12 +155,12 @@
             <label class="span2"><span>Wall conductivity, k<sub>w</sub></span>
               <span class="pair"><input id="in-kw" type="number" step="any" value="1e-7">
                 <select id="in-kw-unit"><option value="cms" selected>cm/s</option><option value="ms">m/s</option><option value="mday">m/day</option><option value="fts">ft/s</option><option value="ftday">ft/day</option></select></span></label>
-            <label><span>Specific yield, S<sub>y</sub></span><input id="in-sy" type="number" step="any" value="0.2"></label>
-            <label>Days to draw down<input id="in-tdrain" type="number" step="any" value="30" placeholder="blank = hold only"></label>
+            <label id="tdrain-field">Days to draw down<input id="in-tdrain" type="number" step="any" value="30" placeholder="blank = hold only"></label>
           </div>
           <p class="hint">The wall is keyed into the low-k layer, taken as impermeable, so water
             reaches the site only through the wall. Inside, the water is level; the wells (or
-            sumps) pump out the water stored inside and then the leakage.</p>
+            sumps) pump out the water stored inside and then the leakage. The specific yield is
+            in step 2; with transient flow, the days to draw down are the days of pumping there.</p>
         </details>
       </section>
 
@@ -210,7 +220,7 @@
       <section class="step" id="step-curve">
         <h2><span class="num">7</span>Design curves</h2>
         <label class="fieldlike"><span>Q<sub>min</sub> against</span>
-          <select id="in-curve-var"><option value="n" selected>Number of wells (rings at the offset above)</option><option value="k">Hydraulic conductivity, k (these wells)</option></select></label>
+          <select id="in-curve-var"><option value="n" selected>Number of wells (rings at the offset above)</option><option value="k">Hydraulic conductivity, k (these wells)</option><option value="t">Days of pumping, t (these wells, transient)</option></select></label>
         <div class="fields two" id="curve-n">
           <label>From n<input id="in-nmin" type="number" step="1" min="3" value="4"></label>
           <label>To n<input id="in-nmax" type="number" step="1" min="4" value="40"></label>
@@ -218,6 +228,10 @@
         <div class="fields two" id="curve-k" hidden>
           <label><span>From k (<span class="uK">cm/s</span>)</span><input id="in-kmin" type="number" step="any" value="1e-4"></label>
           <label><span>To k (<span class="uK">cm/s</span>)</span><input id="in-kmax" type="number" step="any" value="1e-2"></label>
+        </div>
+        <div class="fields two" id="curve-t" hidden>
+          <label>From day<input id="in-tmin" type="number" step="any" value="1"></label>
+          <label>To day<input id="in-tmax" type="number" step="any" value="365"></label>
         </div>
         <p class="hint" id="curve-hint">Past some n, more wells barely lower Q.</p>
         <button id="btn-curve">Compute the design curve</button>
@@ -261,8 +275,8 @@
     <header><h2>How it works</h2><button class="close" data-close>×</button></header>
     <div class="help">
       <p>Dewater designs a ring of dewatering wells around an excavation in an unconfined aquifer
-        underlain by an impermeable layer. It is a quick screening tool: steady state, a uniform
-        isotropic aquifer, fully penetrating wells, and the Dupuit assumptions.</p>
+        underlain by an impermeable layer. It is a quick screening tool: steady or transient flow,
+        a uniform isotropic aquifer, fully penetrating wells, and the Dupuit assumptions.</p>
       <h3>The equation</h3>
       <p>One well pumping q from an unconfined aquifer lowers the head h at distance r to</p>
       <p class="eq">H² − h² = (q / πk) · ln(R / r)</p>
@@ -282,6 +296,22 @@
         usually highest. A design fails if Q<sub>min</sub> would pump a well dry (the head at its
         radius drops to zero): add wells or move them out. The rate actually specified is usually
         Q<sub>min</sub> plus a margin.</p>
+      <h3>Transient pumping</h3>
+      <p>Steady flow needs R, the least certain input. Transient flow replaces it with the specific
+        yield S<sub>y</sub> and the time t since the wells started pumping. Each well follows the
+        Theis solution in the same h² form, with the transmissivity kH:</p>
+      <p class="eq">H² − h² = (q / 2πk) · W(u), &nbsp;&nbsp; u = r² S<sub>y</sub> / (4kHt)</p>
+      <p>W(u) is the Theis well function. At late time W(u)/2 → ln(1.5√(kHt/S<sub>y</sub>)/r)
+        (Cooper–Jacob), so the steady equation holds with R = 1.5√(kHt/S<sub>y</sub>), growing with
+        time. The equation is still linear in q, so the wells add as before and Q<sub>min</sub> is
+        still exact: the smallest rate that brings the water to the required level everywhere in
+        the excavation by day t. With no boundaries, the drawdown keeps growing, so the water keeps
+        falling after day t. The results give the time to dewater at the rate entered, the slider
+        steps the contours and the section through time, and the design curve gives Q<sub>min</sub>
+        against the days allowed: the less time, the more pumping. S<sub>y</sub> is taken as
+        constant (no delayed yield at early times), and the drawdown should stay modest compared
+        with H. A recharge boundary such as a river, or the edge of the aquifer, ends the growth;
+        a steady R stands for that case.</p>
       <h3>A cutoff wall</h3>
       <p>A slurry cutoff wall around the site, keyed into the low-k layer, cuts off the inflow:
         water reaches the inside only through the wall. Two resistances act in series, both linear
@@ -298,7 +328,8 @@
       <p>which integrates in closed form to the time to draw the water down to the required level.
         With a wall, Q<sub>min</sub> is the smallest rate that draws the water down within the days
         allowed and then holds it there (with no time given, it is the leakage at the required
-        level). After the drawdown, the wells are taken to be throttled back to the leakage, and
+        level). With transient flow, the days allowed are the days of pumping, and the aquifer
+        outside follows the Theis solution at r<sub>W</sub>. After the drawdown, the wells are taken to be throttled back to the leakage, and
         the map and the section show that state: the water inside at the required level, and
         outside, the leakage drawn in along the wall. With a tight wall nearly all the head is lost
         across it, so Q<sub>min</sub> hardly depends on k or R. In practice, defects in the wall and
@@ -330,12 +361,13 @@
           ground profile. The ground's range under the excavation is listed under the field,
           <b>Ground contours on the map</b> draws dashed ground contours when zoomed in to building
           scale, and the corner of the map shows the ground elevation under the pointer. The
-          calculation treats the ground and the water table as level. Then enter k and R: typed in,
-          or from Sichardt's or Kusakin's formula.</li>
+          calculation treats the ground and the water table as level. Then enter k, and choose the
+          flow: steady, with R typed in or from Sichardt's or Kusakin's formula, or transient, with
+          the specific yield and the days of pumping.</li>
         <li>Click to place wells, or generate a ring at an offset from the edge. To enclose the
           site with a cutoff wall, open <b>Cutoff wall</b>: place the wall at an offset from the
           edge, or draw it, load it from GeoJSON, or start from the offset and move its corners
-          where the site allows; then give its thickness and conductivity, the aquifer's specific yield, and the days allowed to draw the water down.</li>
+          where the site allows; then give its thickness and conductivity and the days allowed to draw the water down (the specific yield is in step 2).</li>
         <li>Enter a pumping rate and check the results, or find Q<sub>min</sub>.</li>
         <li>Choose what the contours show: depth to water, water elevation (with a ground
           elevation), drawdown, water below the required level, or head above the low-k layer. The
@@ -345,7 +377,8 @@
           you draw. It shows the water level against the static level and the required level, with
           the ground, the excavation, and the wells on the line.</li>
         <li>Use the design curves: Q<sub>min</sub> against the number of wells (rings at the
-          offset), or against k for the wells on the map (or for the wall).</li>
+          offset), against k for the wells on the map (or for the wall), or against the days of
+          pumping (transient flow, or the wall).</li>
       </ol>
       <p class="hint">Units: lengths are in meters or feet (the switch at the top of the panel);
         k and Q each have their own unit, and every flow rate in the results, the design curve,
@@ -361,6 +394,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-  <script type="module" src="js/app.js?v=29"></script>
+  <script type="module" src="js/app.js?v=30"></script>
 </body>
 </html>

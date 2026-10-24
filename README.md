@@ -7,14 +7,15 @@ Design a dewatering well system for an excavation in an unconfined aquifer, in t
 1. Find the site and draw the excavation outline on the map, drag a rectangle (and rotate it to
    match the site), or load a GeoJSON polygon.
 2. Enter the site as depths below ground (water table, bottom of the aquifer, excavation, and the
-   extra depth the water must reach below its bottom), or as elevations; then k and R.
+   extra depth the water must reach below its bottom), or as elevations; then k, and steady flow
+   (R) or transient flow (the specific yield and the days of pumping).
 3. Click to place wells, or generate a ring of wells at an offset from the edge. Optionally,
    enclose the site with a slurry cutoff wall keyed into the low-k layer.
 4. Enter a total pumping rate and check the contours, or find the minimum design pumping rate,
    Q_min: the smallest total rate that dewaters the excavation.
 5. Check cross sections of the water level: east–west, north–south, or along any line you draw.
-6. Compute the design curve, Q_min against the number of wells, to choose how many
-   wells to use.
+6. Compute the design curves: Q_min against the number of wells, to choose how many wells to
+   use; against k; or against the days of pumping.
 
 The ground elevation can be read from open terrain data (AWS Terrain Tiles; USGS 3DEP in the
 US), averaged over the excavation, and the cross section then shows the actual ground profile.
@@ -44,6 +45,12 @@ across its thickness) act as two resistances in series, both linear in h², so t
 closed form. The water inside is taken as level. Q_min is then the smallest rate that draws the
 stored water down to the required level within the days allowed, with the leakage coming in (also
 closed form), and then holds it. See *How it works* in the app.
+
+Transient flow replaces R with the specific yield S_y and the time pumping t: each well follows
+the Theis solution in the same h² form, H² − h² = (q / 2πk) W(u) with u = r² S_y / (4kHt), which
+at late time is the steady equation with R = 1.5√(kHt/S_y). It is still linear in q, so Q_min is
+still exact: the smallest rate that dewaters the excavation by day t. The app also gives the time
+to dewater at a given rate, and a slider steps the contours and the section through time.
 
 This is a screening tool for teaching and preliminary design.
 

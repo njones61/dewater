@@ -1,7 +1,7 @@
 // node --test test/
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { heads, influence, optimalRate, grid, inside, densify } from "../js/model.js";
+import { heads, influence, optimalRate, grid, inside, densify, wellW, reach, timeToDewater } from "../js/model.js";
 
 const p = { H: 50, k: 5e-6, R: 500, rw: 0.15 };
 const close = (a, b, tol = 1e-9) => assert.ok(Math.abs(a - b) <= tol * Math.max(1, Math.abs(b)), `${a} vs ${b}`);
@@ -61,7 +61,7 @@ test("grid, inside, densify", () => {
   assert.equal(densify(sq, 0.25).length, 16);
 });
 
-import { wallCoeffs, wallLeak, wallOutside, wallSteady, wallDrainTime, wallQmin } from "../js/model.js";
+import { wallCoeffs, wallLeak, wallOutside, wallSteady, wallDrainTime, wallQmin, wallLevelAt } from "../js/model.js";
 
 // the deck's example: a wall 20 m outside a 157 × 83 m excavation
 const pw = { H: 50, k: 5e-6, R: 165, rw: 0.15 };
@@ -97,4 +97,36 @@ test("Q_min with a wall drains in the time allowed, and is the leakage with no t
   const T = 30 * 86400, Q = wallQmin(pw, wall, 35, T);
   close(wallDrainTime(Q, pw, wall, 35), T, 1e-6);
   close(wallQmin(pw, wall, 35, 0), wallLeak(35, pw, wall));
+});
+
+test("W(u) matches the tabulated Theis well function", () => {
+  [[1e-4, 8.633225], [0.01, 4.037930], [0.1, 1.822924], [1, 0.2193839], [5, 1.148296e-3]].forEach(([u, W]) => close(wellW(u), W, 1e-6));
+});
+
+test("transient heads: Theis in h² form, and Cooper–Jacob with R = 1.5√(kHt/S_y) at late time", () => {
+  const pt = { ...p, Sy: 0.2, t: 30 * 86400 }, q = 0.002, r = 5;
+  const u = r * r * pt.Sy / (4 * pt.k * pt.H * pt.t);
+  const h = heads([{ x: r, y: 0 }], [{ x: 0, y: 0, q }], pt).h[0];
+  close(pt.H ** 2 - h ** 2, q / (2 * Math.PI * pt.k) * wellW(u));
+  const hs = heads([{ x: r, y: 0 }], [{ x: 0, y: 0, q }], { ...p, R: reach(pt) }).h[0];
+  assert.ok(u < 0.01 && Math.abs(h - hs) < 0.005, `${h} vs ${hs}`);
+});
+
+test("transient Q_min dewaters at the time given, and the time to dewater at Q_min is that time", () => {
+  const pt = { ...p, Sy: 0.2, t: 20 * 86400 };
+  const wells = [[-60, -40], [60, -40], [60, 40], [-60, 40], [0, -40], [0, 40]].map(([x, y]) => ({ x, y }));
+  const ring = [{ x: -45, y: -25 }, { x: 45, y: -25 }, { x: 45, y: 25 }, { x: -45, y: 25 }];
+  const pts = densify(ring, 2).concat(grid([-45, 45, -25, 25], 31, 21));
+  const opt = optimalRate(pts, wells, pt, 35);
+  const { h } = heads(pts, wells.map((w) => ({ ...w, q: opt.qEach })), pt);
+  close(Math.max(...h), 35, 1e-9);
+  close(timeToDewater(pts, wells, pt, 35, opt.Q), pt.t, 2e-4);
+  assert.ok(optimalRate(pts, wells, { ...pt, t: 5 * 86400 }, 35).Q > opt.Q);   // less time, more pumping
+  assert.equal(timeToDewater(pts, wells, pt, 35, opt.Q * 1e-3), Infinity);
+});
+
+test("the level inside the wall at time t inverts the drain time", () => {
+  const Q = 0.02, t = 10 * 86400, h = wallLevelAt(Q, pw, wall, t);
+  assert.ok(h < pw.H && h > wallSteady(Q, pw, wall));
+  close(wallDrainTime(Q, pw, wall, h), t, 1e-6);
 });
