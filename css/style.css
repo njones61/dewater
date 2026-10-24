@@ -175,3 +175,13 @@ button.small { font-size: 12px; padding: 2px 8px; }
 .fields label.switch:has(input:checked) { color: #fff; }
 .switch.gcont { justify-self: start; height: 30px; }
 #ground-range:empty { display: none; }
+
+/* the time bar along the bottom of the map (transient flow) */
+.anim-bar { position: absolute; left: 0; right: 0; bottom: 0; z-index: 650; height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: rgba(255,255,255,.95); border-top: 1px solid var(--line); }
+.anim-bar input[type=range] { flex: 1; min-width: 60px; accent-color: var(--navy); }
+.anim-play { width: 32px; height: 32px; justify-content: center; padding: 0; border-radius: 50%; background: var(--navy); border-color: var(--navy); color: #fff; font-size: 13px; }
+.anim-play:hover { background: var(--navy-dark); }
+.anim-day { font-size: 13px; color: var(--ink); white-space: nowrap; min-width: 9.5em; font-variant-numeric: tabular-nums; }
+.anim-bar button.small { font-size: 12px; padding: 4px 8px; white-space: nowrap; }
+.mapwrap.anim .leaflet-bottom { bottom: 44px; }
+.mapwrap.anim .legend { bottom: 70px; }

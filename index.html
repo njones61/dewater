@@ -8,7 +8,7 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%231F4E79'/%3E%3Cpath d='M4 13 Q16 30 28 13' fill='none' stroke='%23E8582C' stroke-width='3'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.css">
-  <link rel="stylesheet" href="css/style.css?v=19">
+  <link rel="stylesheet" href="css/style.css?v=20">
 </head>
 <body>
   <header class="topbar">
@@ -87,8 +87,8 @@
             <span class="pair"><input id="in-k" type="number" step="any" value="5e-4">
               <select id="in-k-unit"><option value="cms" selected>cm/s</option><option value="ms">m/s</option><option value="mday">m/day</option><option value="fts">ft/s</option><option value="ftday">ft/day</option><option value="gpdft2">gal/day/ft²</option></select></span></label>
           <div class="seg span2" role="radiogroup" aria-label="Steady or transient flow">
-            <label><input type="radio" name="flow" value="steady" checked> Steady</label>
-            <label><input type="radio" name="flow" value="transient"> Transient</label>
+            <label><input type="radio" name="flow" value="transient" checked> Transient</label>
+            <label><input type="radio" name="flow" value="steady"> Steady</label>
           </div>
           <label class="span2" id="R-method-field">Radius of influence, R
             <select id="in-R-method">
@@ -103,10 +103,9 @@
           <p class="hint span2" id="R-note" hidden>Empirical, in meters with k in m/s (Bear 1979, p. 306). The
             wells are treated as one large well of the excavation's equivalent radius, r<sub>e</sub> = √(A/π),
             drawn down by s, the drawdown the excavation needs; R is measured from its center.</p>
-          <label class="range span2" id="tslide-field" hidden>Time<input id="in-tslide" type="range" min="0" max="1000" step="1" value="620"></label>
           <p class="hint span2" id="t-note" hidden>The wells start pumping at t = 0 (the Theis solution).
             Q<sub>min</sub> is the smallest rate that dewaters the excavation by day t; the water keeps
-            falling after that. Drag the slider to watch the water come down.</p>
+            falling after that. The bar under the map plays the drawdown through time.</p>
         </div>
         <p class="hint">The aquifer sits on a low-permeability layer, and the ground and the water
           table start out level. The water must come down to the excavation bottom, plus any extra
@@ -255,6 +254,12 @@
         <div id="map"></div>
         <div class="legend" id="legend" hidden></div>
         <div class="maptip" id="maptip" hidden></div>
+        <div class="anim-bar" id="anim-bar" hidden>
+          <button id="anim-play" class="anim-play" title="Play the drawdown through time" aria-label="Play">▶</button>
+          <input id="anim-t" type="range" min="0" max="1000" step="1" value="1000" aria-label="Time since pumping started">
+          <span class="anim-day" id="anim-day"></span>
+          <button id="anim-design" class="small" title="Back to the design day">Design day</button>
+        </div>
       </div>
       <div class="divider" id="divider" role="separator" aria-orientation="horizontal" aria-label="Drag to resize the cross section" tabindex="0" hidden></div>
       <div class="section-panel" id="section-panel" hidden>
@@ -306,8 +311,9 @@
         time. The equation is still linear in q, so the wells add as before and Q<sub>min</sub> is
         still exact: the smallest rate that brings the water to the required level everywhere in
         the excavation by day t. With no boundaries, the drawdown keeps growing, so the water keeps
-        falling after day t. The results give the time to dewater at the rate entered, the slider
-        steps the contours and the section through time, and the design curve gives Q<sub>min</sub>
+        falling after day t. The results give the time to dewater at the rate entered, the bar
+        under the map plays the contours and the section through time (from 0.1 day to twice
+        the design day, on a log scale), and the design curve gives Q<sub>min</sub>
         against the days allowed: the less time, the more pumping. S<sub>y</sub> is taken as
         constant (no delayed yield at early times), and the drawdown should stay modest compared
         with H. A recharge boundary such as a river, or the edge of the aquifer, ends the growth;
@@ -394,6 +400,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-  <script type="module" src="js/app.js?v=30"></script>
+  <script type="module" src="js/app.js?v=31"></script>
 </body>
 </html>

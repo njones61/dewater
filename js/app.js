@@ -196,20 +196,58 @@ function showFlow() {
   const tr = flow() === "transient";
   $("R-method-field").hidden = tr; $("R-field").hidden = tr;
   $("R-note").hidden = tr || $("in-R-method").value === "entered";
-  ["tdays-field", "tslide-field", "t-note"].forEach((id) => ($(id).hidden = !tr));
+  ["tdays-field", "t-note"].forEach((id) => ($(id).hidden = !tr));
   $("sy-field").hidden = !(tr || $("in-wall").checked);
   $("tdrain-field").hidden = tr;
-  syncSlider();
+  showAnim();
 }
-const slideToDays = (v) => 10 ** (-1 + 4 * v / 1000);
-function syncSlider() { const d = num("in-tdays"); if (d > 0) $("in-tslide").value = Math.round((Math.log10(d) + 1) * 250); }
-document.querySelectorAll('input[name="flow"]').forEach((r) => r.addEventListener("change", () => { showFlow(); showR(); updateDerived(); schedule(); }));
-$("in-tslide").addEventListener("input", () => {
-  const d = slideToDays(+$("in-tslide").value);
-  $("in-tdays").value = trim(+d.toPrecision(d < 10 ? 2 : 3));
-  updateDerived(); schedule(60);
-});
-$("in-tdays").addEventListener("input", syncSlider);
+document.querySelectorAll('input[name="flow"]').forEach((r) => r.addEventListener("change", () => { stopAnim(); state.viewT = null; showFlow(); showR(); updateDerived(); schedule(); }));
+$("in-tdays").addEventListener("input", () => { stopAnim(); state.viewT = null; });
+
+// The time bar along the bottom of the map: the map and the section at any time from 0.1 day to
+// twice the design day, on a log scale, or played through. The design (Q_min, the results' days of
+// pumping) stays at the design day; only the view moves.
+const T0 = 0.1 * 86400;
+const tEnd = () => Math.max(2 * num("in-tdays") * 86400, 10 * 86400);
+const toT = (v) => T0 * (tEnd() / T0) ** (v / 1000);
+const toV = (t) => Math.round(1000 * Math.log(t / T0) / Math.log(tEnd() / T0));
+let animFrame = null;
+function showAnim() {
+  const on = flow() === "transient" && !!state.last && num("in-tdays") > 0;
+  $("anim-bar").hidden = !on;
+  document.querySelector(".mapwrap").classList.toggle("anim", on);
+  if (!on) stopAnim();
+}
+function setView(t) { state.viewT = t; run(); }
+function stopAnim() {
+  if (animFrame) cancelAnimationFrame(animFrame);
+  animFrame = null;
+  $("anim-play").textContent = "▶"; $("anim-play").setAttribute("aria-label", "Play");
+}
+$("anim-play").onclick = () => {
+  if (animFrame) return stopAnim();
+  let v = +$("anim-t").value;
+  if (v >= 1000) v = 0;
+  $("anim-play").textContent = "❚❚"; $("anim-play").setAttribute("aria-label", "Pause");
+  let last = performance.now();
+  const step = (now) => {
+    v = Math.min(1000, v + (now - last) / 8);          // the whole span in about 8 s
+    last = now;
+    $("anim-t").value = v;
+    setView(toT(v));
+    if (v >= 1000) return stopAnim();
+    animFrame = requestAnimationFrame(step);
+  };
+  animFrame = requestAnimationFrame(step);
+};
+$("anim-t").addEventListener("input", () => { stopAnim(); setView(toT(+$("anim-t").value)); });
+$("anim-design").onclick = () => { stopAnim(); state.viewT = null; run(); };
+function syncAnim(p) {
+  const tDesign = num("in-tdays") * 86400, t = p.t, day = t / 86400;
+  if (!animFrame) $("anim-t").value = toV(t);
+  $("anim-day").textContent = `Day ${fmtNum(+day.toPrecision(day < 10 ? 2 : 3))}${Math.abs(t - tDesign) > 1e-6 * tDesign ? ` · design day ${fmtNum(tDesign / 86400)}` : " (design)"}`;
+  $("anim-design").hidden = Math.abs(t - tDesign) <= 1e-6 * tDesign;
+}
 
 function updateDerived() {
   showR();
@@ -222,7 +260,7 @@ function updateDerived() {
       + (Number.isFinite(s.gelev) ? ` Water table at elevation ${fmt((s.gelev - s.dwt) / Lf(), 2)}; required level ${fmt((s.gelev - s.dexc - s.margin) / Lf(), 2)}.` : "");
   } else $("derived").textContent = "";
   if (p.t !== undefined && p.t > 0 && p.Sy > 0 && p.k > 0 && p.H > 0)
-    $("derived").textContent += ` After ${fmtNum(p.t / 86400)} days the drawdown spreads to about 1.5√(kHt/Sᵧ) = ${fmtL(p.R, 0)} from each well.`;
+    $("derived").textContent += ` After ${dayN(p.t)} days the drawdown spreads to about 1.5√(kHt/Sᵧ) = ${fmtL(p.R, 0)} from each well.`;
 }
 // Switching how the levels are entered carries the site over, so the design stays the same.
 function carryLevels() {
@@ -596,6 +634,7 @@ function run() {
   clearResults();
   wallLayer.clearLayers();
   const p = params(), err = checkParams(p);
+  if (!err && p.t !== undefined && state.viewT) { p.t = state.viewT; p.R = reach(p); }
   const ringLL = excRing();
   if (err) return setStatus("bad", err);
   if (!ringLL && !state.wells.length) return setStatus("idle", "Draw an excavation and add wells.");
@@ -626,9 +665,12 @@ function run() {
   const dryWells = [];
   hw.forEach((v, i) => { state.wells[i].marker.setIcon(wellIcon(v <= 0)); if (v <= 0) dryWells.push(i); });
 
-  state.last = { p, box, nx, ny, h, ring, wells, hmax, at, hw, qEach };
+  state.last = { p, box, nx, ny, h, ring, wells, hmax, at, hw, qEach,
+    hRange: p.t !== undefined ? spanRange(["w", p.Q, p.k, p.H, p.Sy, p.rw, wells, box, tEnd()], () => heads(G, W, { ...p, t: tEnd() }).h) : null };
   drawResults();
   drawSection();
+  showAnim();
+  if (p.t !== undefined) syncAnim(p);
 
   // status and numbers
   const rows = [
@@ -652,9 +694,9 @@ function run() {
     rows.push(["Target head", fmtL(p.target, 2)]);
     rows.push(["Margin (target − highest)", fmtL(p.target - hmax, 2)]);
   }
-  const tr = p.t !== undefined, tDew = tr && ring ? timeToDewater(cp, wells, p, p.target, p.Q) : NaN;
+  const tr = p.t !== undefined, tDew = tr && ring ? dewaterTime(cp, wells, p) : NaN;
   if (tr) {
-    rows.push(["Days of pumping, t", fmtNum(p.t / 86400)]);
+    rows.push(["Days of pumping, t", dayN(p.t)]);
     if (ring) rows.push(["Time to dewater at Q", Number.isFinite(tDew) ? fmtDays(tDew) : "more than 10 years"]);
     rows.push(["Spread of the drawdown, 1.5√(kHt/S<sub>y</sub>)", fmtL(p.R, 0)]);
   } else if (p.Rmethod !== "entered") {
@@ -669,16 +711,33 @@ function run() {
     setStatus("idle", "Draw or load the excavation to check the design.");
   } else if (state.optQ && Math.abs(p.Q - state.optQ) <= 1e-5 * state.optQ && Math.abs(hmax - p.target) < 1e-3) {
     // still the minimum design pumping rate found (in whatever units it is now shown)
-    setStatus("ok", tr ? `Minimum design pumping rate: ${fmtQ(state.optQ)}. On day ${fmtNum(p.t / 86400)} the highest water in the excavation reaches the required level, and it keeps falling after that.`
+    setStatus("ok", tr ? `Minimum design pumping rate: ${fmtQ(state.optQ)}. On day ${dayN(p.t)} the highest water in the excavation reaches the required level, and it keeps falling after that.`
       : `Minimum design pumping rate: ${fmtQ(state.optQ)}. The highest water in the excavation is exactly at the required level.${state.optNote || ""}`);
   } else if (hmax <= p.target) {
-    const by = tr ? ` by day ${fmtNum(p.t / 86400)} (it got there in ${fmtDays(tDew)})` : "";
+    const by = tr ? ` by day ${dayN(p.t)} (it got there in ${fmtDays(tDew)})` : "";
     setStatus("ok", st ? `Dewatered${by}: the water is at least ${fmtL(st.dbase - hmax - st.dexc, 2)} below the excavation bottom everywhere inside it.`
       : `Dewatered${by}: the water is at or below the target head everywhere in the excavation.`);
   } else {
-    const when = tr ? ` on day ${fmtNum(p.t / 86400)}. ${Number.isFinite(tDew) ? `At this rate it gets there in ${fmtDays(tDew)}.` : "At this rate it doesn't get there within 10 years."}` : " at the marked point.";
+    const when = tr ? ` on day ${dayN(p.t)}. ${Number.isFinite(tDew) ? `At this rate it gets there in ${fmtDays(tDew)}.` : "At this rate it doesn't get there within 10 years."}` : " at the marked point.";
     setStatus("warn", `Not dewatered: the water is ${fmtL(hmax - p.target, 2)} above the required level${when}`);
   }
+}
+
+// In transient flow the contours and colors keep one scale through time: from the static level
+// down to the lowest water at the end of the time bar's span (kept while the bar plays).
+let rangeMemo = { key: null, r: null };
+function spanRange(keyParts, hEnd) {
+  const key = JSON.stringify(keyParts);
+  if (rangeMemo.key !== key) { const h = hEnd(); let lo = Infinity; for (const v of h) lo = Math.min(lo, v); rangeMemo = { key, r: [lo, keyParts[3]] }; }
+  return rangeMemo.r;
+}
+
+// The time to dewater at Q doesn't change with the time viewed, so it is kept while the bar plays.
+let dewMemo = { key: null, t: NaN };
+function dewaterTime(cp, wells, p) {
+  const key = JSON.stringify([p.Q, p.k, p.H, p.Sy, p.target, p.rw, wells, cp.length, cp[0]]);
+  if (dewMemo.key !== key) dewMemo = { key, t: timeToDewater(cp, wells, p, p.target, p.Q) };
+  return dewMemo.t;
 }
 
 // The site inside a cutoff wall. The wells are taken as throttled to hold the water inside at the
@@ -708,9 +767,16 @@ function runWall(p, ring, wells) {
   const h = headAt(grid(box, nx, ny));
   const n = wells.length, qEach = n ? p.Q / n : 0, hw = wells.map(() => hHold);
   state.wells.forEach((wl) => wl.marker.setIcon(wellIcon(false)));
-  state.last = { p, box, nx, ny, h, ring, wells, hmax: hHold, at: null, hw, qEach, headAt, wall: { ...g, w, hHold, leak, hOut } };
+  const hRange = tr ? spanRange(["wall", p.Q, p.k, p.H, p.Sy, p.rw, g.ring, w, box, tEnd()], () => {
+    const pe = { ...p, t: tEnd() }, le = wallLeak(Math.max(wallSteady(p.Q, pe, w), p.target), pe, w);
+    const he = heads(grid(box, nx, ny), sinks.map((q) => ({ ...q, q: le / sinks.length })), { ...pOut, t: pe.t }).h;
+    return [...he, p.target];
+  }) : null;
+  state.last = { p, box, nx, ny, h, ring, wells, hmax: hHold, at: null, hw, qEach, headAt, hRange, wall: { ...g, w, hHold, leak, hOut } };
   drawResults();
   drawSection();
+  showAnim();
+  if (p.t !== undefined) syncAnim(p);
 
   const st = p.site;
   const lvl = (z) => (st && st.elev ? `elevation ${fmt((st.gelev - st.dbase + z) / Lf(), 2)}` : st ? `${fmtL(st.dbase - z, 2)} below ground` : `h = ${fmtL(z, 2)}`);
@@ -725,13 +791,13 @@ function runWall(p, ring, wells) {
     ["Time to draw down at Q", Number.isFinite(tDrain) ? days(tDrain) : "never: Q is less than the leakage"],
   ];
   if (n) rows.push(["Wells", `${n}${outside ? ` (${outside} outside the wall)` : ""}`], ["Rate per well", fmtQ(qEach)]);
-  rows.push([tr ? `Water inside the wall on day ${fmtNum(p.t / 86400)}` : "Water inside the wall", lvl(hHold)], ["Water at the wall's outside face", lvl(hOut)]);
+  rows.push([tr ? `Water inside the wall on day ${dayN(p.t)}` : "Water inside the wall", lvl(hHold)], ["Water at the wall's outside face", lvl(hOut)]);
   if (p.t !== undefined) rows.push(["Spread of the drawdown outside, 1.5√(kHt/S<sub>y</sub>)", fmtL(p.R, 0)]);
   else if (p.Rmethod !== "entered") rows.push(["Equivalent radius, √(A/π)", fmtL(rEquiv(), 1)], ["R from the formula", fmtL(p.R, 0)]);
   $("results").innerHTML = rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("");
   const where = outside ? ` ${outside} well${outside > 1 ? "s are" : " is"} outside the wall: move ${outside > 1 ? "them" : "it"} inside.` : "";
   if (early && Number.isFinite(tDrain)) {
-    setStatus("warn", `Not dewatered by day ${fmtNum(p.t / 86400)}: the water inside the wall is ${fmtL(hHold - p.target, 2)} above the required level. At this rate it gets there in ${days(tDrain)}.${where}`);
+    setStatus("warn", `Not dewatered by day ${dayN(p.t)}: the water inside the wall is ${fmtL(hHold - p.target, 2)} above the required level. At this rate it gets there in ${days(tDrain)}.${where}`);
   } else if (hHold > p.target + 1e-9 || !Number.isFinite(tDrain)) {
     setStatus("warn", `Not dewatered: at this rate the water inside the wall levels off ${fmtL(hHold - p.target, 2)} above the required level. Q must be more than the leakage, ${fmtQ(leakT)}.${where}`);
   } else if (state.optQ && Math.abs(p.Q - state.optQ) <= 1e-5 * state.optQ) {
@@ -784,7 +850,11 @@ function drawResults() {
   clearResults();
   const { box, nx, ny, p } = last;
   const { v, title, tgt, drier } = fieldValues(last);
-  const lo = d3.min(v), hi = d3.max(v);
+  let lo = d3.min(v), hi = d3.max(v);
+  if (last.hRange) {
+    const e = fieldValues({ ...last, h: Float64Array.from(last.hRange) }).v;
+    lo = Math.min(lo, e[0], e[1]); hi = Math.max(hi, e[0], e[1]);
+  }
   if (!(hi > lo)) return;
   // the required level always gets its own contour
   const levels = [...new Set([...niceLevels(lo, hi), ...(tgt > lo && tgt < hi ? [tgt] : [])])].sort((a, b) => a - b);
@@ -1252,6 +1322,7 @@ window.addEventListener("resize", () => drawSection());
 
 // ------------------------------------------------------------------ minimum design pumping rate
 $("btn-optimize").onclick = () => {
+  stopAnim(); state.viewT = null;
   const p = params(), err = checkParams({ ...p, Q: 0 });
   if (err) return setStatus("bad", err);
   const ring = excRing();
@@ -1535,6 +1606,7 @@ function fmt(v, d) {
   if (Math.abs(v) < 0.5 * 10 ** -d) v = 0;           // no "-0.00"
   return v.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
 }
+const dayN = (t) => fmtNum(+(t / 86400).toPrecision(t < 10 * 86400 ? 2 : 3));
 function fmtDays(t) { const d = t / 86400; return `${fmt(d, d < 10 ? 1 : 0)} day${fmt(d, d < 10 ? 1 : 0) === "1" ? "" : "s"}`; }
 function fmtNum(v) { return Number.isFinite(v) ? +v.toPrecision(4) : "—"; }
 function fmtQ(q) { return `${fmtNum(q / Qf())} ${Qn()}`; }

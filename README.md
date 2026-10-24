@@ -7,8 +7,8 @@ Design a dewatering well system for an excavation in an unconfined aquifer, in t
 1. Find the site and draw the excavation outline on the map, drag a rectangle (and rotate it to
    match the site), or load a GeoJSON polygon.
 2. Enter the site as depths below ground (water table, bottom of the aquifer, excavation, and the
-   extra depth the water must reach below its bottom), or as elevations; then k, and steady flow
-   (R) or transient flow (the specific yield and the days of pumping).
+   extra depth the water must reach below its bottom), or as elevations; then k, and transient
+   flow (the specific yield and the days of pumping) or steady flow (R).
 3. Click to place wells, or generate a ring of wells at an offset from the edge. Optionally,
    enclose the site with a slurry cutoff wall keyed into the low-k layer.
 4. Enter a total pumping rate and check the contours, or find the minimum design pumping rate,
@@ -50,7 +50,8 @@ Transient flow replaces R with the specific yield S_y and the time pumping t: ea
 the Theis solution in the same h² form, H² − h² = (q / 2πk) W(u) with u = r² S_y / (4kHt), which
 at late time is the steady equation with R = 1.5√(kHt/S_y). It is still linear in q, so Q_min is
 still exact: the smallest rate that dewaters the excavation by day t. The app also gives the time
-to dewater at a given rate, and a slider steps the contours and the section through time.
+to dewater at a given rate, and a time bar under the map plays the contours and the section
+through time, on one scale. Transient is the default: the schedule sets the rate.
 
 This is a screening tool for teaching and preliminary design.
 
