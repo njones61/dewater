@@ -676,7 +676,9 @@ function run() {
   hw.forEach((v, i) => { state.wells[i].marker.setIcon(wellIcon(v <= 0)); if (v <= 0) dryWells.push(i); });
 
   const hEnd = () => (sched ? schedHeads(G, wells, { ...p, t: td }, sched, true).h : heads(G, W, { ...p, t: td }).h);
+  // the section follows the schedule too, not the starting rate held constant
   state.last = { p, box, nx, ny, h, ring, wells, hmax, at, hw, qEach, sched, tDew, qNow, capped: plan && plan.capped,
+    headAt: sched ? (pts) => schedHeads(pts, wells, p, sched).h : null,
     hRange: tr ? spanRange(["w", p.Q, p.k, p.H, p.Sy, p.rw, wells, box, td, tEnd()], hEnd) : null };
   drawResults();
   drawSection();
