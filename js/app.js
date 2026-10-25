@@ -626,7 +626,7 @@ function wallGeom() {
   ring.forEach((q, i) => { const r2 = ring[(i + 1) % ring.length]; P += Math.hypot(r2.x - q.x, r2.y - q.y); });
   return { ringLL, ring, P, Aw: polyArea(ring) };
 }
-$("in-wall").addEventListener("change", () => { if ($("in-wall").checked) $("wall-box").open = true; showWallSrc(); showFlow(); schedule(); });
+$("in-wall").addEventListener("change", () => { showWallSrc(); showFlow(); schedule(); });
 
 // ------------------------------------------------------------------ analysis
 let timer = null;
@@ -754,7 +754,7 @@ function run() {
 
   if (sched) return setStatus(...scheduleStatus(p, plan, hmax, td));
   if (dryWells.length) {
-    setStatus("bad", `${dryWells.length} well${dryWells.length > 1 ? "s" : ""} pumped dry (shown red): the rate is more than the aquifer can deliver there. Add wells, lower Q, or enclose the site with a cutoff wall (step 3).`);
+    setStatus("bad", `${dryWells.length} well${dryWells.length > 1 ? "s" : ""} pumped dry (shown red): the rate is more than the aquifer can deliver there. Add wells, lower Q, or enclose the site with a cutoff wall (step 4).`);
   } else if (!ring) {
     setStatus("idle", "Draw or load the excavation to check the design.");
   } else if (state.optQ && Math.abs(p.Q - state.optQ) <= 1e-5 * state.optQ && Math.abs(hmax - p.target) < 1e-3) {
@@ -773,7 +773,7 @@ function run() {
 function scheduleStatus(p, plan, hmax, td) {
   const { sched, tDew, capped } = plan, q = rateAt(sched, p.t);
   const cut = capped ? ", cut back weekly to keep the wells from going dry" : "";
-  const fix = "Add wells, move them farther out, allow more days, or enclose the site with a cutoff wall (step 3).";
+  const fix = "Add wells, move them farther out, allow more days, or enclose the site with a cutoff wall (step 4).";
   if (state.viewT && Math.abs(state.viewT - td) > 1e-6 * td) {
     if (p.t < tDew) return ["warn", `Day ${dayN(p.t)}: drawing down at ${fmtQ(q)}; the water is ${fmtL(hmax - p.target, 2)} above the required level. ${tDew < Infinity ? `Dewatered on day ${dayN(tDew)}.` : `Not dewatered by day ${dayN(tEnd())}.`}`];
     return ["ok", `Day ${dayN(p.t)}: held at the required level, pumping ${fmtQ(q)}. Dewatered on day ${dayN(tDew)}; since then the rate has stepped down weekly.`];
@@ -1531,7 +1531,7 @@ $("btn-optimize").onclick = () => {
   $("in-Q").value = trim(Math.ceil(qv / mag) * mag);
   state.optQ = opt.feasible ? opt.Q : null;
   run(); persist();
-  if (!opt.feasible) setStatus("bad", `The minimum design pumping rate would pump a well dry. Add wells, move them farther out, ${p.t !== undefined ? "allow more days to dewater, " : ""}or enclose the site with a cutoff wall (step 3).`);
+  if (!opt.feasible) setStatus("bad", `The minimum design pumping rate would pump a well dry. Add wells, move them farther out, ${p.t !== undefined ? "allow more days to dewater, " : ""}or enclose the site with a cutoff wall (step 4).`);
 };
 
 // ------------------------------------------------------------------ design curves

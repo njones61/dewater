@@ -9,12 +9,12 @@ Design a dewatering well system for an excavation in an unconfined aquifer, in t
 2. Enter the site as depths below ground (water table, bottom of the aquifer, excavation, and the
    extra depth the water must reach below its bottom), or as elevations; then k, and transient
    flow (the specific yield and the days to dewater) or steady flow (R).
-3. Click to place wells, or generate a ring of wells at an offset from the edge. Optionally,
-   enclose the site with a slurry cutoff wall keyed into the low-k layer.
-4. Enter a total pumping rate and check the contours, or find the minimum design pumping rate,
+3. Click to place wells, or generate a ring of wells at an offset from the edge.
+4. Optionally, enclose the site with a cutoff wall (a slurry trench) keyed into the low-k layer.
+5. Enter a total pumping rate and check the contours, or find the minimum design pumping rate,
    Q_min: the smallest total rate that dewaters the excavation.
-5. Check cross sections of the water level: east–west, north–south, or along any line you draw.
-6. Compute the design curves: Q_min against the number of wells, to choose how many wells to
+6. Check cross sections of the water level: east–west, north–south, or along any line you draw.
+7. Compute the design curves: Q_min against the number of wells, to choose how many wells to
    use; against k; or against the days to dewater. In transient flow each point is the design
    for the deadline (the starting rate, cut back where needed), and the curves mark the fewest
    wells and the shortest deadline the wells can meet.

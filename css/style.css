@@ -189,3 +189,6 @@ button.small { font-size: 12px; padding: 2px 8px; }
 .anim-bar button.small { font-size: 12px; padding: 4px 8px; white-space: nowrap; }
 .mapwrap.anim .leaflet-bottom { bottom: 44px; }
 .mapwrap.anim .legend { bottom: 70px; }
+#wall-box > .switch { height: 30px; margin: 4px 0 10px; }
+#wall-box > .seg.small { margin: 0 0 4px; }
+#wall-box .fields { margin: 8px 0; }
