@@ -190,7 +190,7 @@ function showR() {
 $("in-R-method").addEventListener("change", () => { showR(); schedule(); });
 
 // Steady flow uses a radius of influence; transient flow uses the specific yield and the time
-// pumping (Theis), and the slider runs the time from 0.1 to 1000 days on a log scale.
+// pumping (Theis); the time bar under the map steps through the days.
 const flow = () => document.querySelector('input[name="flow"]:checked').value;
 function showFlow() {
   const tr = flow() === "transient";
@@ -204,13 +204,14 @@ function showFlow() {
 document.querySelectorAll('input[name="flow"]').forEach((r) => r.addEventListener("change", () => { stopAnim(); state.viewT = null; showFlow(); showR(); updateDerived(); schedule(); }));
 $("in-tdays").addEventListener("input", () => { stopAnim(); state.viewT = null; });
 
-// The time bar along the bottom of the map: the map and the section at any time from 0.1 day to
-// twice the design day, on a log scale, or played through. The design (Q_min, the results' days of
-// pumping) stays at the design day; only the view moves.
-const T0 = 0.1 * 86400;
+// The time bar along the bottom of the map: the map and the section at any time up to twice the
+// design day, or played through at a steady number of days per second. The bar is linear in time:
+// away from the wells the water hardly moves for the first days and then follows ln t, so a log bar
+// spent half the playback on nothing. The design (Q_min, the results' days of pumping) stays at the
+// design day; only the view moves.
 const tEnd = () => Math.max(2 * num("in-tdays") * 86400, 10 * 86400);
-const toT = (v) => T0 * (tEnd() / T0) ** (v / 1000);
-const toV = (t) => Math.round(1000 * Math.log(t / T0) / Math.log(tEnd() / T0));
+const toT = (v) => tEnd() * Math.max(v, 1) / 1000;     // the bar starts one step in, not at t = 0
+const toV = (t) => Math.round(1000 * t / tEnd());
 let animFrame = null;
 function showAnim() {
   const on = flow() === "transient" && !!state.last && num("in-tdays") > 0;
