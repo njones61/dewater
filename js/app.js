@@ -270,7 +270,7 @@ function syncAnim(p) {
   const tDesign = num("in-tdays") * 86400, t = p.t, day = t / 86400;
   if (!animFrame) $("anim-t").value = toV(t);
   $("anim-day").textContent = `Day ${fmtNum(+day.toPrecision(day < 10 ? 2 : 3))}${Math.abs(t - tDesign) > 1e-6 * tDesign ? ` · design day ${fmtNum(tDesign / 86400)}` : " (design)"}`;
-  $("anim-design").hidden = Math.abs(t - tDesign) <= 1e-6 * tDesign;
+  $("anim-design").style.visibility = Math.abs(t - tDesign) <= 1e-6 * tDesign ? "hidden" : "";   // keeps its space: the bar's length never changes
 }
 
 function updateDerived() {

@@ -185,7 +185,7 @@ button.small { font-size: 12px; padding: 2px 8px; }
 .anim-bar input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--navy); border: 2px solid #fff; box-shadow: 0 0 0 1px var(--navy); }
 .anim-play { width: 32px; height: 32px; justify-content: center; padding: 0; border-radius: 50%; background: var(--navy); border-color: var(--navy); color: #fff; font-size: 13px; }
 .anim-play:hover { background: var(--navy-dark); }
-.anim-day { font-size: 13px; color: var(--ink); white-space: nowrap; min-width: 9.5em; font-variant-numeric: tabular-nums; }
+.anim-day { font-size: 13px; color: var(--ink); white-space: nowrap; width: 13.5em; flex: none; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .anim-bar button.small { font-size: 12px; padding: 4px 8px; white-space: nowrap; }
 .mapwrap.anim .leaflet-bottom { bottom: 44px; }
 .mapwrap.anim .legend { bottom: 70px; }
