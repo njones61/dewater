@@ -8,14 +8,14 @@ Design a dewatering well system for an excavation in an unconfined aquifer, in t
    match the site), or load a GeoJSON polygon.
 2. Enter the site as depths below ground (water table, bottom of the aquifer, excavation, and the
    extra depth the water must reach below its bottom), or as elevations; then k, and transient
-   flow (the specific yield and the days of pumping) or steady flow (R).
+   flow (the specific yield and the days to dewater) or steady flow (R).
 3. Click to place wells, or generate a ring of wells at an offset from the edge. Optionally,
    enclose the site with a slurry cutoff wall keyed into the low-k layer.
 4. Enter a total pumping rate and check the contours, or find the minimum design pumping rate,
    Q_min: the smallest total rate that dewaters the excavation.
 5. Check cross sections of the water level: east–west, north–south, or along any line you draw.
 6. Compute the design curves: Q_min against the number of wells, to choose how many wells to
-   use; against k; or against the days of pumping.
+   use; against k; or against the days to dewater.
 
 The ground elevation can be read from open terrain data (AWS Terrain Tiles; USGS 3DEP in the
 US), averaged over the excavation, and the cross section then shows the actual ground profile.
@@ -51,7 +51,11 @@ the Theis solution in the same h² form, H² − h² = (q / 2πk) W(u) with u = 
 at late time is the steady equation with R = 1.5√(kHt/S_y). It is still linear in q, so Q_min is
 still exact: the smallest rate that dewaters the excavation by day t. The app also gives the time
 to dewater at a given rate, and a time bar under the map plays the contours and the section
-through time, on one scale. Transient is the default: the schedule sets the rate.
+through time, on one scale. Once the excavation is dewatered, the wells need only enough to keep
+it so: the rate steps down weekly, each step the lowest rate that holds the water at the required
+level for the next four weeks (rate changes add in time, as in a recovery test), and *Pumping
+schedule* plots the rates and gives the water pumped. Transient is the default: the schedule sets
+the rate.
 
 This is a screening tool for teaching and preliminary design.
 

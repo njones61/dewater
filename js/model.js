@@ -144,6 +144,88 @@ export function timeToDewater(checkPoints, wells, p, target, Q, tMax = 3650 * 86
   return hi;
 }
 
+// ------------------------------------------------------------------ holding the water down
+// Once the excavation is dewatered, the wells need only enough to keep it so. The rate is stepped
+// down at fixed intervals; each step is the lowest rate that keeps the water at or below the
+// target everywhere in the excavation until the next step. Rate changes add in time (superposition,
+// as for recovery): with a schedule of total rates Q₀ from t = 0, Q₁ from t₁, …, shared equally,
+//
+//     H² − h² = Σᵢ (Qᵢ − Qᵢ₋₁)/n · A(t − tᵢ)
+//
+// where A(τ) is the influence of the wells after pumping for τ (influence above). sched is an array
+// of {t, Q}, t in s from the start of pumping, the first at t = 0.
+
+// W(u) from a table on log u: for the contour grid, where the exact series would be called tens of
+// millions of times per frame. Relative error below 1e-6.
+const WT_LO = -14, WT_HI = Math.log10(700), WT_N = 6000, WT = new Float64Array(WT_N + 1);
+for (let i = 0; i <= WT_N; i++) WT[i] = wellW(10 ** (WT_LO + (WT_HI - WT_LO) * i / WT_N));
+function wellWFast(u) {
+  if (u >= 700) return 0;
+  const f = (Math.log10(u) - WT_LO) / (WT_HI - WT_LO) * WT_N;
+  if (f < 0) return wellW(u);
+  const i = Math.floor(f), g = f - i;
+  return WT[i] + g * (WT[i + 1] - WT[i]);
+}
+
+// Heads at time p.t under a rate schedule (wells sharing each rate equally). fast uses the W(u)
+// table. Returns {h, dry} as heads does.
+export function schedHeads(points, wells, p, sched, fast = false) {
+  const n = wells.length, H2 = p.H * p.H, c = 1 / (Math.PI * p.k), rw2 = p.rw * p.rw, Wf = fast ? wellWFast : wellW;
+  const steps = [];
+  sched.forEach((s, i) => {
+    if (s.t >= p.t) return;
+    const dQ = s.Q - (i ? sched[i - 1].Q : 0);
+    if (dQ) steps.push({ dq: dQ / n, a: p.Sy / (4 * p.k * p.H * (p.t - s.t)) });
+  });
+  const h = new Float64Array(points.length);
+  let dry = 0;
+  for (let j = 0; j < points.length; j++) {
+    const { x, y } = points[j];
+    let s = 0;
+    for (const w of wells) {
+      const r2 = Math.max((x - w.x) ** 2 + (y - w.y) ** 2, rw2);
+      for (const st of steps) s += st.dq * 0.5 * Wf(r2 * st.a);
+    }
+    const v = H2 - s * c;
+    if (v <= 0) { h[j] = 0; dry++; } else h[j] = Math.sqrt(v);
+  }
+  return { h, dry };
+}
+
+// The schedule: Q from t = 0 until tDew (when Q has dewatered the excavation), then a step every
+// `step` seconds until tEnd. Each step is the lowest rate (not below 0) that, kept for the next
+// `ahead` steps (or to tEnd), holds the water at or below the target at every check point, checked
+// m times a step. With only the next step in view the rate swings up and down (a deep cut lets the
+// water climb back the week after); four weeks ahead gives steps that settle and then ease down.
+// Each step is checked from its own start, so the excavation stays dry throughout.
+export function holdSchedule(checkPoints, wells, p, target, Q, tDew, tEnd, step = 7 * 86400, m = 4, ahead = 4) {
+  const sched = [{ t: 0, Q }];
+  if (!(tDew < tEnd) || !wells.length || !checkPoints.length) return sched;
+  const n = wells.length, D = p.H * p.H - target * target, memo = new Map();
+  const A = (tau) => {
+    const key = Math.round(tau);
+    if (!memo.has(key)) memo.set(key, influence(checkPoints, wells, { ...p, t: tau }));
+    return memo.get(key);
+  };
+  for (let t1 = tDew; t1 < tEnd - 1; t1 += step) {
+    const prev = sched[sched.length - 1].Q;
+    let dq = -Infinity;                     // the change in the rate per well needed at t1
+    const tH = Math.min(tEnd, t1 + ahead * step);
+    for (let k = 1, tau = 0; tau < tH; k++) {        // m times a step, and always at tH
+      tau = Math.min(t1 + step * k / m, tH);
+      const Aj = A(tau - t1);
+      const past = new Float64Array(checkPoints.length);
+      sched.forEach((s, i) => {
+        const d = (s.Q - (i ? sched[i - 1].Q : 0)) / n, Ai = A(tau - s.t);
+        for (let j = 0; j < past.length; j++) past[j] += d * Ai[j];
+      });
+      for (let j = 0; j < past.length; j++) if (Aj[j] > 0) dq = Math.max(dq, (D - past[j]) / Aj[j]);
+    }
+    sched.push({ t: t1, Q: Math.max(0, prev + dq * n) });
+  }
+  return sched;
+}
+
 // A regular grid of points over a box, nx by ny, row by row from the top (y1) down, so it can be
 // handed to a contouring routine as a raster.
 export function grid(box, nx, ny) {

@@ -97,7 +97,7 @@
               <option value="kusakin">Kusakin: R = rₑ + 575 s √(Hk)</option>
             </select></label>
           <label id="R-field"><span>R (<span class="uL">m</span>)</span><input id="in-R" type="number" step="any" value="500"></label>
-          <label id="tdays-field" hidden>Days of pumping, t<input id="in-tdays" type="number" step="any" min="0" value="30"></label>
+          <label id="tdays-field" hidden>Days to dewater, t<input id="in-tdays" type="number" step="any" min="0" value="30"></label>
           <label id="sy-field" hidden><span>Specific yield, S<sub>y</sub></span><input id="in-sy" type="number" step="any" value="0.2"></label>
           <label><span>Well radius, r<sub>w</sub> (<span class="uL">m</span>)</span><input id="in-rw" type="number" step="any" value="0.15"></label>
           <p class="hint span2" id="R-note" hidden>Empirical, in meters with k in m/s (Bear 1979, p. 306). The
@@ -159,7 +159,7 @@
           <p class="hint">The wall is keyed into the low-k layer, taken as impermeable, so water
             reaches the site only through the wall. Inside, the water is level; the wells (or
             sumps) pump out the water stored inside and then the leakage. The specific yield is
-            in step 2; with transient flow, the days to draw down are the days of pumping there.</p>
+            in step 2; with transient flow, the days to draw down are the days to dewater there.</p>
         </details>
       </section>
 
@@ -172,7 +172,7 @@
               <select id="in-Q-unit"><option value="m3s" selected>m³/s</option><option value="m3day">m³/day</option><option value="lps">L/s</option><option value="gpm">gpm</option><option value="cfs">ft³/s</option><option value="ft3day">ft³/day</option><option value="mgd">MGD</option></select></span></label>
         </div>
         <p class="hint">Shared equally by the wells. Every flow rate in the results is given in this unit.</p>
-        <div class="row"><button id="btn-optimize" class="primary">Find Q<sub>min</sub></button></div>
+        <div class="row"><button id="btn-optimize" class="primary">Find Q<sub>min</sub></button><button id="btn-sched" hidden>Pumping schedule</button></div>
         <div id="status" class="status idle">Draw an excavation and add wells.</div>
         <dl class="results" id="results"></dl>
       </section>
@@ -219,7 +219,7 @@
       <section class="step" id="step-curve">
         <h2><span class="num">7</span>Design curves</h2>
         <label class="fieldlike"><span>Q<sub>min</sub> against</span>
-          <select id="in-curve-var"><option value="n" selected>Number of wells (rings at the offset above)</option><option value="k">Hydraulic conductivity, k (these wells)</option><option value="t">Days of pumping, t (these wells, transient)</option></select></label>
+          <select id="in-curve-var"><option value="n" selected>Number of wells (rings at the offset above)</option><option value="k">Hydraulic conductivity, k (these wells)</option><option value="t">Days to dewater, t (these wells, transient)</option></select></label>
         <div class="fields two" id="curve-n">
           <label>From n<input id="in-nmin" type="number" step="1" min="3" value="4"></label>
           <label>To n<input id="in-nmax" type="number" step="1" min="4" value="40"></label>
@@ -276,6 +276,13 @@
     <footer><button id="btn-curve-png">Download PNG</button><button id="btn-curve-csv">Download CSV</button><button data-close class="primary">Close</button></footer>
   </dialog>
 
+  <dialog id="dlg-sched" class="dlg">
+    <header><h2>Pumping schedule</h2><button class="close" data-close>×</button></header>
+    <div id="sched-chart"></div>
+    <p class="hint" id="sched-note"></p>
+    <footer><button id="btn-sched-png">Download PNG</button><button id="btn-sched-csv">Download CSV</button><button data-close class="primary">Close</button></footer>
+  </dialog>
+
   <dialog id="dlg-help" class="dlg wide">
     <header><h2>How it works</h2><button class="close" data-close>×</button></header>
     <div class="help">
@@ -310,8 +317,12 @@
         (Cooper–Jacob), so the steady equation holds with R = 1.5√(kHt/S<sub>y</sub>), growing with
         time. The equation is still linear in q, so the wells add as before and Q<sub>min</sub> is
         still exact: the smallest rate that brings the water to the required level everywhere in
-        the excavation by day t. With no boundaries, the drawdown keeps growing, so the water keeps
-        falling after day t. The results give the time to dewater at the rate entered, the bar
+        the excavation by day t. With no boundaries, the drawdown would keep growing at that rate,
+        so once the excavation is dewatered the rate steps down once a week: each step is the
+        lowest rate that holds the water at the required level for the next four weeks (rate
+        changes add in time, as in a recovery test). <b>Pumping schedule</b> plots the steps and
+        gives the water pumped. A schedule is given only when the wells can deliver Q until the
+        excavation is dewatered. The results give the time to dewater at the rate entered, the bar
         under the map plays the contours and the section through time (up to twice the design
         day), and the design curve gives Q<sub>min</sub>
         against the days allowed: the less time, the more pumping. S<sub>y</sub> is taken as
@@ -334,7 +345,7 @@
       <p>which integrates in closed form to the time to draw the water down to the required level.
         With a wall, Q<sub>min</sub> is the smallest rate that draws the water down within the days
         allowed and then holds it there (with no time given, it is the leakage at the required
-        level). With transient flow, the days allowed are the days of pumping, and the aquifer
+        level). With transient flow, the days allowed are the days to dewater, and the aquifer
         outside follows the Theis solution at r<sub>W</sub>. After the drawdown, the wells are taken to be throttled back to the leakage, and
         the map and the section show that state: the water inside at the required level, and
         outside, the leakage drawn in along the wall. With a tight wall nearly all the head is lost
@@ -369,7 +380,7 @@
           scale, and the corner of the map shows the ground elevation under the pointer. The
           calculation treats the ground and the water table as level. Then enter k, and choose the
           flow: steady, with R typed in or from Sichardt's or Kusakin's formula, or transient, with
-          the specific yield and the days of pumping.</li>
+          the specific yield and the days to dewater.</li>
         <li>Click to place wells, or generate a ring at an offset from the edge. To enclose the
           site with a cutoff wall, open <b>Cutoff wall</b>: place the wall at an offset from the
           edge, or draw it, load it from GeoJSON, or start from the offset and move its corners
@@ -400,6 +411,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-  <script type="module" src="js/app.js?v=36"></script>
+  <script type="module" src="js/app.js?v=37"></script>
 </body>
 </html>

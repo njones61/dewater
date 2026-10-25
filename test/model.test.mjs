@@ -1,7 +1,7 @@
 // node --test test/
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { heads, influence, optimalRate, grid, inside, densify, wellW, reach, timeToDewater } from "../js/model.js";
+import { heads, influence, optimalRate, grid, inside, densify, wellW, reach, timeToDewater, schedHeads, holdSchedule } from "../js/model.js";
 
 const p = { H: 50, k: 5e-6, R: 500, rw: 0.15 };
 const close = (a, b, tol = 1e-9) => assert.ok(Math.abs(a - b) <= tol * Math.max(1, Math.abs(b)), `${a} vs ${b}`);
@@ -129,4 +129,26 @@ test("the level inside the wall at time t inverts the drain time", () => {
   const Q = 0.02, t = 10 * 86400, h = wallLevelAt(Q, pw, wall, t);
   assert.ok(h < pw.H && h > wallSteady(Q, pw, wall));
   close(wallDrainTime(Q, pw, wall, h), t, 1e-6);
+});
+
+test("holding the water down: steps that keep the excavation dry, and schedule heads that add rate changes in time", () => {
+  const pt = { ...p, Sy: 0.2 }, tD = 60 * 86400, tEnd = 120 * 86400;
+  const wells = [[-60, -40], [60, -40], [60, 40], [-60, 40], [0, -40], [0, 40]].map(([x, y]) => ({ x, y }));
+  const ring = [{ x: -45, y: -25 }, { x: 45, y: -25 }, { x: 45, y: 25 }, { x: -45, y: 25 }];
+  const pts = densify(ring, 2).concat(grid([-45, 45, -25, 25], 31, 21));
+  const opt = optimalRate(pts, wells, { ...pt, t: tD }, 35);
+  // one rate throughout: the schedule heads are the plain heads
+  const one = [{ t: 0, Q: opt.Q }], at = { ...pt, t: tD };
+  close(Math.max(...schedHeads(pts, wells, at, one).h), Math.max(...heads(pts, wells.map((w) => ({ ...w, q: opt.qEach })), at).h), 1e-9);
+  // a rate change adds in time: Q₁ from t₁ is Q₀ throughout plus (Q₁ − Q₀) from t₁
+  const two = [{ t: 0, Q: opt.Q }, { t: tD, Q: opt.Q / 2 }], t2 = { ...pt, t: tD + 10 * 86400 };
+  const a = influence(pts.slice(0, 1), wells, t2)[0], b = influence(pts.slice(0, 1), wells, { ...pt, t: 10 * 86400 })[0];
+  close(pt.H ** 2 - schedHeads(pts.slice(0, 1), wells, t2, two).h[0] ** 2, opt.qEach * a - opt.qEach / 2 * b, 1e-9);
+  // the hold: weekly steps after day 60, every one below Q_min, and the water never above the target
+  const s = holdSchedule(pts, wells, pt, 35, opt.Q, tD, tEnd);
+  assert.equal(s.length, 1 + Math.ceil((tEnd - tD) / (7 * 86400)));
+  assert.ok(s.slice(1).every((e) => e.Q < opt.Q && e.Q >= 0));
+  for (let d = 60.5; d <= 120; d += 0.5) assert.ok(Math.max(...schedHeads(pts, wells, { ...pt, t: d * 86400 }, s).h) <= 35 + 1e-3, `day ${d}`);
+  // and the table W(u) used for the contours agrees with the series
+  close(Math.max(...schedHeads(pts, wells, t2, s, true).h), Math.max(...schedHeads(pts, wells, t2, s).h), 1e-6);
 });
