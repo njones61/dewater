@@ -244,7 +244,29 @@ $("anim-play").onclick = () => {
 };
 $("anim-t").addEventListener("input", () => { stopAnim(); setView(toT(+$("anim-t").value)); });
 $("anim-design").onclick = () => { stopAnim(); state.viewT = null; run(); };
+// The time bar's colors: gray while the water is still above the required level, green from the
+// day the excavation is dewatered, red wherever a well is dry (sampled at 200 times along the
+// bar). Kept while the bar plays; recomputed when the design changes.
+const BAR = { wait: "#d5dbe1", dew: "#2fa866", dry: "#b3261e" };
+let barMemo = { key: null, r: null };
+function barStates(keyParts, tDew, dryAt) {
+  const key = JSON.stringify(keyParts);
+  if (barMemo.key !== key) {
+    const te = tEnd(), M = 200, s = [];
+    for (let i = 0; i < M; i++) { const t = te * (i + 0.5) / M; s.push(dryAt(t) ? "dry" : t >= tDew ? "dew" : "wait"); }
+    barMemo = { key, r: s };
+  }
+  return barMemo.r;
+}
+function paintBar(states) {
+  const el = $("anim-t");
+  if (!states) return void (el.style.background = "");
+  const M = states.length, stops = [];
+  states.forEach((st, i) => { if (!i || st !== states[i - 1]) stops.push(`${BAR[st]} ${(100 * i / M).toFixed(2)}%`); if (i === M - 1 || st !== states[i + 1]) stops.push(`${BAR[st]} ${(100 * (i + 1) / M).toFixed(2)}%`); });
+  el.style.background = `linear-gradient(to right, ${stops.join(", ")})`;
+}
 function syncAnim(p) {
+  paintBar(state.last && state.last.bar);
   const tDesign = num("in-tdays") * 86400, t = p.t, day = t / 86400;
   if (!animFrame) $("anim-t").value = toV(t);
   $("anim-day").textContent = `Day ${fmtNum(+day.toPrecision(day < 10 ? 2 : 3))}${Math.abs(t - tDesign) > 1e-6 * tDesign ? ` · design day ${fmtNum(tDesign / 86400)}` : " (design)"}`;
@@ -678,7 +700,8 @@ function run() {
   hw.forEach((v, i) => { state.wells[i].marker.setIcon(wellIcon(v <= 0)); if (v <= 0) dryWells.push(i); });
 
   const hEnd = () => headAt(G, td, true);
-  state.last = { p, box, nx, ny, h, ring, wells, hmax, at, hw, qEach, sched, tDew, qNow, capped: plan && plan.capped, headAt,
+  const bar = tr ? barStates(["w", p.Q, p.k, p.H, p.Sy, p.rw, wells, tDew, tEnd()], tDew, (t) => headAt(wpts, t).some((v) => v <= 0)) : null;
+  state.last = { p, box, nx, ny, h, ring, wells, hmax, at, hw, qEach, sched, tDew, qNow, capped: plan && plan.capped, headAt, bar,
     hRange: tr ? spanRange(["w", p.Q, p.k, p.H, p.Sy, p.rw, wells, box, td, tEnd()], hEnd) : null };
   drawResults();
   drawSection();
@@ -878,7 +901,8 @@ function runWall(p, ring, wells) {
     const pe = { ...p, t: tDesign() };
     return wallDrainTime(p.Q, pe, w, p.target) > pe.t ? wallLevelAt(p.Q, pe, w, pe.t) : Math.max(wallSteady(p.Q, pe, w), p.target);
   })()) : null;
-  state.last = { p, box, nx, ny, h, ring, wells, hmax: hHold, at: null, hw, qEach, headAt, hRange, wall: { ...g, w, hHold, leak, hOut } };
+  const bar = tr ? barStates(["wall", p.Q, p.k, p.H, p.Sy, tDrain, tEnd()], tDrain, () => false) : null;
+  state.last = { p, box, nx, ny, h, ring, wells, hmax: hHold, at: null, hw, qEach, headAt, hRange, bar, wall: { ...g, w, hHold, leak, hOut } };
   drawResults();
   drawSection();
   showAnim();
@@ -1045,7 +1069,9 @@ function drawResults() {
     + `<div class="key"><span class="sw" style="background:#E8582C;height:3px"></span>Required level</div>`
     + ($("in-dewatered").checked ? `<div class="key"><span class="sw" style="background:rgba(47,168,102,.35);border:1px dashed #1e7a46"></span>Below the required level</div>` : "")
     + (last.hw && last.hw.some((v) => v <= 0) ? `<div class="key"><span class="sw dot" style="background:#b3261e"></span>Well pumped dry</div>` : "")
-    + (last.at && last.hmax > p.target ? `<div class="key"><span class="sw dot" style="border:2.5px solid #b3261e"></span>Highest water in the excavation</div>` : "");
+    + (last.at && last.hmax > p.target ? `<div class="key"><span class="sw dot" style="border:2.5px solid #b3261e"></span>Highest water in the excavation</div>` : "")
+    + (last.bar ? [["wait", "Time bar: still drawing down"], ["dew", "Time bar: dewatered"], ["dry", "Time bar: a well is dry"]]
+      .filter(([k]) => last.bar.includes(k)).map(([k, t]) => `<div class="key"><span class="sw" style="background:${BAR[k]};height:6px;border-radius:3px"></span>${t}</div>`).join("") : "");
   $("legend").hidden = false;
 }
 const levelDigits = (lv) => (lv.length > 1 && lv[1] - lv[0] < 1 ? 1 : 0);
