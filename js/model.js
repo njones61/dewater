@@ -192,38 +192,138 @@ export function schedHeads(points, wells, p, sched, fast = false) {
   return { h, dry };
 }
 
-// The schedule: Q from t = 0 until tDew (when Q has dewatered the excavation), then a step every
-// `step` seconds until tEnd. Each step is the lowest rate (not below 0) that, kept for the next
-// `ahead` steps (or to tEnd), holds the water at or below the target at every check point, checked
-// m times a step. With only the next step in view the rate swings up and down (a deep cut lets the
-// water climb back the week after); four weeks ahead gives steps that settle and then ease down.
-// Each step is checked from its own start, so the excavation stays dry throughout.
-export function holdSchedule(checkPoints, wells, p, target, Q, tDew, tEnd, step = 7 * 86400, m = 4, ahead = 4) {
-  const sched = [{ t: 0, Q }];
-  if (!(tDew < tEnd) || !wells.length || !checkPoints.length) return sched;
-  const n = wells.length, D = p.H * p.H - target * target, memo = new Map();
-  const A = (tau) => {
-    const key = Math.round(tau);
-    if (!memo.has(key)) memo.set(key, influence(checkPoints, wells, { ...p, t: tau }));
-    return memo.get(key);
+// The pumping schedule, in two phases, with a step every `step` seconds (checked m times a step):
+//
+//   drawdown: pump Q, cut back only as far as needed to keep every well from going dry (the head
+//     at the well's radius above 0.1% of H). A rate more than the wells can take becomes "as hard as
+//     they can go", falling week by week as the cone deepens.
+//   hold: once the water is at or below the target everywhere in the excavation (tDew), step down
+//     to the lowest rate that, kept for the next `ahead` steps, holds it there, and
+//     never more than the wells can take. With only the next step in view the rate swings up and
+//     down (a deep cut lets the water climb back the week after); four weeks ahead gives steps that
+//     settle and then ease down.
+//
+// Returns {sched, tDew, capped}: sched as for schedHeads (consecutive equal rates merged), tDew
+// the time the excavation is dewatered (Infinity if not by tEnd), and whether the wells limited the
+// drawdown rate.
+export function pumpSchedule(checkPoints, wells, p, target, Q, tEnd, step = 7 * 86400, m = 4, ahead = 4) {
+  const n = wells.length, H2 = p.H * p.H, D = H2 - target * target, floor2 = (1e-3 * p.H) ** 2;
+  const wpts = wells.map((w) => ({ x: w.x + p.rw, y: w.y }));
+  if (!n || !checkPoints.length) return { sched: [{ t: 0, Q }], tDew: Infinity, capped: false };
+  const sched = [], memo = { c: new Map(), w: new Map() };
+  const A = (key, pts, tau) => {
+    const k = Math.round(tau), mm = memo[key];
+    if (!mm.has(k)) mm.set(k, influence(pts, wells, { ...p, t: tau }));
+    return mm.get(k);
   };
-  for (let t1 = tDew; t1 < tEnd - 1; t1 += step) {
-    const prev = sched[sched.length - 1].Q;
-    let dq = -Infinity;                     // the change in the rate per well needed at t1
-    const tH = Math.min(tEnd, t1 + ahead * step);
-    for (let k = 1, tau = 0; tau < tH; k++) {        // m times a step, and always at tH
-      tau = Math.min(t1 + step * k / m, tH);
-      const Aj = A(tau - t1);
-      const past = new Float64Array(checkPoints.length);
-      sched.forEach((s, i) => {
-        const d = (s.Q - (i ? sched[i - 1].Q : 0)) / n, Ai = A(tau - s.t);
-        for (let j = 0; j < past.length; j++) past[j] += d * Ai[j];
-      });
-      for (let j = 0; j < past.length; j++) if (Aj[j] > 0) dq = Math.max(dq, (D - past[j]) / Aj[j]);
+  // Σ ΔQᵢ/n · A(τ − tᵢ): H² − h² at each point at time τ, under the schedule so far
+  const past = (key, pts, tau) => {
+    const out = new Float64Array(pts.length);
+    sched.forEach((s, i) => {
+      if (s.t >= tau) return;
+      const d = (s.Q - (i ? sched[i - 1].Q : 0)) / n, Ai = A(key, pts, tau - s.t);
+      for (let j = 0; j < out.length; j++) out[j] += d * Ai[j];
+    });
+    return out;
+  };
+  const prevQ = () => (sched.length ? sched[sched.length - 1].Q : 0);
+  const push = (t, q) => { if (!sched.length || q !== prevQ()) sched.push({ t, Q: q }); };
+  // the most the wells can take from t1 to t2 without one going dry, with the rate changed at t1
+  const wellMax = (t1, t2) => {
+    const prev = prevQ();
+    let qm = Infinity;
+    for (let k = 1, tau = t1; tau < t2; k++) {
+      tau = Math.min(t1 + step * k / m, t2);
+      const pw = past("w", wpts, tau), Aw = A("w", wpts, tau - t1);
+      for (let j = 0; j < wpts.length; j++) qm = Math.min(qm, prev + n * (H2 - floor2 - pw[j]) / Aw[j]);
     }
-    sched.push({ t: t1, Q: Math.max(0, prev + dq * n) });
+    return Math.max(0, qm);
+  };
+  const dewatered = (tau) => { const v = past("c", checkPoints, tau); for (const x of v) if (x < D) return false; return true; };
+
+  // drawdown
+  let tDew = Infinity, capped = false;
+  // the first time in (t1, t2] the excavation is dewatered under the schedule so far, or Infinity
+  const dewIn = (t1, t2) => {
+    let lo = t1;
+    for (let k = 1; k <= 2 * m; k++) {
+      const tau = t1 + (t2 - t1) * k / (2 * m);
+      if (!dewatered(tau)) { lo = tau; continue; }
+      let hi = tau;
+      for (let it = 0; it < 30 && hi - lo > 60; it++) { const mid = (lo + hi) / 2; if (dewatered(mid)) hi = mid; else lo = mid; }
+      return hi;
+    }
+    return Infinity;
+  };
+  for (let t1 = 0; t1 < tEnd - 1; t1 += step) {
+    const t2 = Math.min(t1 + step, tEnd);
+    // try Q; the wells need only last until the excavation is dewatered, when the rate drops
+    const before = sched.length, last = prevQ();
+    push(t1, Q);
+    let td = dewIn(t1, t2);
+    sched.length = before;
+    if (before && sched[before - 1].Q !== last) sched[before - 1].Q = last;
+    // capped, the rate is the most the wells take until the excavation is dewatered at that rate:
+    // a lower rate dewaters later and must last longer, so iterate to agreement
+    let h = Math.min(t2, td), q = Q;
+    for (let it = 0; it < 40; it++) {
+      q = Math.min(Q, wellMax(t1, h));
+      if (q === Q) break;
+      push(t1, q);
+      td = dewIn(t1, t2);
+      sched.length = before;
+      if (before && sched[before - 1].Q !== last) sched[before - 1].Q = last;
+      if (td <= h * (1 + 1e-6) || h >= t2) break;
+      h = Math.min(t2, td);
+    }
+    if (q < Q) capped = true;
+    push(t1, q);
+    if (q < Q) td = dewIn(t1, t2);
+    if (td < Infinity) { tDew = td; break; }
   }
-  return sched;
+  if (!(tDew < tEnd)) return { sched, tDew, capped };
+
+  // hold
+  for (let t1 = tDew; t1 < tEnd - 1; t1 += step) {
+    const prev = prevQ(), tH = t1 + ahead * step;        // past tEnd too, or the last steps fall away
+    let dq = -Infinity;                                  // the change in the rate per well needed at t1
+    for (let k = 1, tau = t1; tau < tH; k++) {           // m times a step, and always at tH
+      tau = Math.min(t1 + step * k / m, tH);
+      const pc = past("c", checkPoints, tau), Aj = A("c", checkPoints, tau - t1);
+      for (let j = 0; j < pc.length; j++) if (Aj[j] > 0) dq = Math.max(dq, (D - pc[j]) / Aj[j]);
+    }
+    const hold = Math.max(0, prev + dq * n);
+    push(t1, Math.min(hold, wellMax(t1, Math.min(t1 + step, tEnd))));
+  }
+  return { sched, tDew, capped };
+}
+
+// The design for a deadline td: the smallest starting rate whose schedule (pumpSchedule) dewaters
+// the excavation by td. Where the wells can deliver it, that is the constant-rate Q_min (exact);
+// where they can't, the rate is cut back weekly and the start must be higher, found by bisection.
+// If even pumping as hard as the wells can go misses td, the result is that fastest schedule.
+// The search checks the points of the excavation where the water is highest (smallest influence
+// at td), then confirms with every check point. Returns {Q, met, tDew}.
+export function deadlineRate(checkPoints, wells, p, target, td, tEnd) {
+  const o = optimalRate(checkPoints, wells, { ...p, t: td }, target);
+  if (!o || !isFinite(o.Q)) return null;
+  if (o.feasible) return { Q: o.Q, met: true, tDew: td };
+  const A = influence(checkPoints, wells, { ...p, t: td });
+  const few = Array.from(A.keys()).sort((i, j) => A[i] - A[j]).slice(0, 150).map((i) => checkPoints[i]);
+  const run = (Q, pts = few) => pumpSchedule(pts, wells, p, target, Q, tEnd);
+  const fast = run(Infinity);
+  if (!(fast.tDew <= td)) { const f = run(Infinity, checkPoints); if (!(f.tDew <= td)) return { Q: f.sched[0].Q, met: false, tDew: f.tDew }; }
+  let lo = o.Q, hi = fast.sched[0].Q;
+  for (let it = 0; it < 40 && hi - lo > 1e-3 * hi; it++) {
+    const mid = 0.5 * (lo + hi);
+    if (run(mid).tDew <= td) hi = mid; else lo = mid;
+  }
+  for (let it = 0; it < 20; it++) {                 // confirm with every check point
+    const r = run(hi, checkPoints);
+    if (r.tDew <= td) return { Q: hi, met: true, tDew: r.tDew };
+    hi *= 1.002;
+  }
+  return { Q: hi, met: true, tDew: td };
 }
 
 // A regular grid of points over a box, nx by ny, row by row from the top (y1) down, so it can be

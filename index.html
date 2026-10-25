@@ -317,12 +317,15 @@
         (Cooper–Jacob), so the steady equation holds with R = 1.5√(kHt/S<sub>y</sub>), growing with
         time. The equation is still linear in q, so the wells add as before and Q<sub>min</sub> is
         still exact: the smallest rate that brings the water to the required level everywhere in
-        the excavation by day t. With no boundaries, the drawdown would keep growing at that rate,
-        so once the excavation is dewatered the rate steps down once a week: each step is the
-        lowest rate that holds the water at the required level for the next four weeks (rate
-        changes add in time, as in a recovery test). <b>Pumping schedule</b> plots the steps and
-        gives the water pumped. A schedule is given only when the wells can deliver Q until the
-        excavation is dewatered. The results give the time to dewater at the rate entered, the bar
+        the excavation by day t. The pumping follows one schedule, in two phases, adjusted once a
+        week (rate changes add in time, as in a recovery test). <i>Drawdown:</i> pump Q, cut back
+        only as far as needed to keep every well from going dry; the wells can take much more at
+        the start than later, as the cone deepens. <i>Hold:</i> once the excavation is dewatered,
+        step down to the lowest rate that holds the water at the required level for the next four
+        weeks. <b>Find Q<sub>min</sub></b> gives the smallest starting rate that meets the deadline
+        (the constant rate, when the wells can deliver it), or, if the wells can't meet it, the
+        fastest they can do and the day it takes. <b>Pumping schedule</b> plots the steps and gives
+        the water pumped. The results give the day the excavation is dewatered, the bar
         under the map plays the contours and the section through time (up to twice the design
         day), and the design curve gives Q<sub>min</sub>
         against the days allowed: the less time, the more pumping. S<sub>y</sub> is taken as
@@ -411,6 +414,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-  <script type="module" src="js/app.js?v=38"></script>
+  <script type="module" src="js/app.js?v=39"></script>
 </body>
 </html>

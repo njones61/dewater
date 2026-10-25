@@ -1,7 +1,7 @@
 // node --test test/
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { heads, influence, optimalRate, grid, inside, densify, wellW, reach, timeToDewater, schedHeads, holdSchedule } from "../js/model.js";
+import { heads, influence, optimalRate, grid, inside, densify, wellW, reach, timeToDewater, schedHeads, pumpSchedule, deadlineRate } from "../js/model.js";
 
 const p = { H: 50, k: 5e-6, R: 500, rw: 0.15 };
 const close = (a, b, tol = 1e-9) => assert.ok(Math.abs(a - b) <= tol * Math.max(1, Math.abs(b)), `${a} vs ${b}`);
@@ -132,11 +132,12 @@ test("the level inside the wall at time t inverts the drain time", () => {
 });
 
 test("holding the water down: steps that keep the excavation dry, and schedule heads that add rate changes in time", () => {
-  const pt = { ...p, Sy: 0.2 }, tD = 60 * 86400, tEnd = 120 * 86400;
+  const pt = { ...p, Sy: 0.2 }, tD = 120 * 86400, tEnd = 240 * 86400;
   const wells = [[-60, -40], [60, -40], [60, 40], [-60, 40], [0, -40], [0, 40]].map(([x, y]) => ({ x, y }));
   const ring = [{ x: -45, y: -25 }, { x: 45, y: -25 }, { x: 45, y: 25 }, { x: -45, y: 25 }];
   const pts = densify(ring, 2).concat(grid([-45, 45, -25, 25], 31, 21));
   const opt = optimalRate(pts, wells, { ...pt, t: tD }, 35);
+  assert.ok(opt.feasible);
   // one rate throughout: the schedule heads are the plain heads
   const one = [{ t: 0, Q: opt.Q }], at = { ...pt, t: tD };
   close(Math.max(...schedHeads(pts, wells, at, one).h), Math.max(...heads(pts, wells.map((w) => ({ ...w, q: opt.qEach })), at).h), 1e-9);
@@ -144,11 +145,34 @@ test("holding the water down: steps that keep the excavation dry, and schedule h
   const two = [{ t: 0, Q: opt.Q }, { t: tD, Q: opt.Q / 2 }], t2 = { ...pt, t: tD + 10 * 86400 };
   const a = influence(pts.slice(0, 1), wells, t2)[0], b = influence(pts.slice(0, 1), wells, { ...pt, t: 10 * 86400 })[0];
   close(pt.H ** 2 - schedHeads(pts.slice(0, 1), wells, t2, two).h[0] ** 2, opt.qEach * a - opt.qEach / 2 * b, 1e-9);
-  // the hold: weekly steps after day 60, every one below Q_min, and the water never above the target
-  const s = holdSchedule(pts, wells, pt, 35, opt.Q, tD, tEnd);
-  assert.equal(s.length, 1 + Math.ceil((tEnd - tD) / (7 * 86400)));
+  // the schedule at Q_min: dewatered on day 120, then weekly steps, every one below Q_min, and the
+  // water never above the target after that
+  const { sched: s, tDew, capped } = pumpSchedule(pts, wells, pt, 35, opt.Q, tEnd);
+  close(tDew, tD, 1e-4);
+  assert.equal(capped, false);
+  assert.ok(s.slice(1).every((e) => Math.abs((e.t - tDew) / (7 * 86400) - Math.round((e.t - tDew) / (7 * 86400))) < 1e-9));   // on the weeks
   assert.ok(s.slice(1).every((e) => e.Q < opt.Q && e.Q >= 0));
-  for (let d = 60.5; d <= 120; d += 0.5) assert.ok(Math.max(...schedHeads(pts, wells, { ...pt, t: d * 86400 }, s).h) <= 35 + 1e-3, `day ${d}`);
+  for (let d = 120.5; d <= 240; d += 1) assert.ok(Math.max(...schedHeads(pts, wells, { ...pt, t: d * 86400 }, s).h) <= 35 + 1e-3, `day ${d}`);
   // and the table W(u) used for the contours agrees with the series
   close(Math.max(...schedHeads(pts, wells, t2, s, true).h), Math.max(...schedHeads(pts, wells, t2, s).h), 1e-6);
+});
+
+test("the drawdown is cut back to keep the wells wet, and the deadline design meets the deadline", () => {
+  const pt = { ...p, Sy: 0.2 }, wellHead = (sched, d) => Math.min(...schedHeads(wells.map((w) => ({ x: w.x + pt.rw, y: w.y })), wells, { ...pt, t: d * 86400 }, sched).h);
+  const wells = [[-60, -40], [60, -40], [60, 40], [-60, 40], [0, -40], [0, 40]].map(([x, y]) => ({ x, y }));
+  const ring = [{ x: -45, y: -25 }, { x: 45, y: -25 }, { x: 45, y: 25 }, { x: -45, y: 25 }];
+  const pts = densify(ring, 2).concat(grid([-45, 45, -25, 25], 31, 21));
+  // as hard as the wells can go: the rate falls week by week, and no well goes dry
+  const fast = pumpSchedule(pts, wells, pt, 35, Infinity, 120 * 86400);
+  assert.ok(fast.capped && fast.tDew < 120 * 86400);
+  const draw = fast.sched.filter((e) => e.t < fast.tDew);
+  assert.ok(draw.every((e, i) => !i || e.Q < draw[i - 1].Q));
+  for (let d = 0.5; d <= 120; d += 0.5) assert.ok(wellHead(fast.sched, d) > 0, `day ${d}`);
+  // a deadline between the fastest and the constant-rate one: met, starting below the fastest rate
+  const tdays = Math.ceil(fast.tDew / 86400) + 2, dr = deadlineRate(pts, wells, pt, 35, tdays * 86400, 2 * tdays * 86400);
+  assert.ok(dr.met && dr.tDew <= tdays * 86400 && dr.Q < fast.sched[0].Q);
+  // a deadline sooner than the fastest: not met, and the fastest is given
+  const miss = deadlineRate(pts, wells, pt, 35, (fast.tDew / 86400 - 2) * 86400, 120 * 86400);
+  assert.ok(!miss.met);
+  close(miss.tDew, fast.tDew, 1e-3);
 });

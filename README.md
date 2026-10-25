@@ -48,14 +48,14 @@ closed form), and then holds it. See *How it works* in the app.
 
 Transient flow replaces R with the specific yield S_y and the time pumping t: each well follows
 the Theis solution in the same h² form, H² − h² = (q / 2πk) W(u) with u = r² S_y / (4kHt), which
-at late time is the steady equation with R = 1.5√(kHt/S_y). It is still linear in q, so Q_min is
-still exact: the smallest rate that dewaters the excavation by day t. The app also gives the time
-to dewater at a given rate, and a time bar under the map plays the contours and the section
-through time, on one scale. Once the excavation is dewatered, the wells need only enough to keep
-it so: the rate steps down weekly, each step the lowest rate that holds the water at the required
-level for the next four weeks (rate changes add in time, as in a recovery test), and *Pumping
-schedule* plots the rates and gives the water pumped. Transient is the default: the schedule sets
-the rate.
+at late time is the steady equation with R = 1.5√(kHt/S_y). It is still linear in q, so the constant
+rate that dewaters the excavation by day t is exact. A time bar under the map plays the contours and the section
+through time, on one scale. The pumping follows one schedule, adjusted weekly (rate changes add
+in time, as in a recovery test): Q until the excavation is dewatered, cut back only where a well
+would otherwise go dry, then stepped down to the lowest rate that holds the water at the required
+level for the next four weeks. *Find Q_min* gives the smallest starting rate that meets the
+deadline, or, when the wells can't, the fastest they can do; *Pumping schedule* plots the rates
+and gives the water pumped. Transient is the default: the deadline sets the rate.
 
 This is a screening tool for teaching and preliminary design.
 
