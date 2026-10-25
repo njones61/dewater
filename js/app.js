@@ -725,7 +725,7 @@ function run() {
   if (held && !dryWells.length && hmax <= p.target + 1e-3) {
     setStatus("ok", `Day ${dayN(p.t)}: held at the required level. Dewatered on day ${dayN(tDew)}; since then the rate has stepped down weekly, to ${fmtQ(qNow)} now.`);
   } else if (dryWells.length) {
-    setStatus("bad", `${dryWells.length} well${dryWells.length > 1 ? "s" : ""} pumped dry (shown red): the rate is more than the aquifer can deliver there. Add wells or lower Q.`);
+    setStatus("bad", `${dryWells.length} well${dryWells.length > 1 ? "s" : ""} pumped dry (shown red): the rate is more than the aquifer can deliver there. Add wells, lower Q, or enclose the site with a cutoff wall (step 3).`);
   } else if (!ring) {
     setStatus("idle", "Draw or load the excavation to check the design.");
   } else if (state.optQ && Math.abs(p.Q - state.optQ) <= 1e-5 * state.optQ && Math.abs(hmax - p.target) < 1e-3) {
@@ -1461,7 +1461,7 @@ $("btn-optimize").onclick = () => {
   $("in-Q").value = trim(Math.ceil(qv / mag) * mag);
   state.optQ = opt.feasible ? opt.Q : null;
   run(); persist();
-  if (!opt.feasible) setStatus("bad", "The minimum design pumping rate would pump a well dry. Add wells, or move them farther out.");
+  if (!opt.feasible) setStatus("bad", `The minimum design pumping rate would pump a well dry. Add wells, move them farther out, ${p.t !== undefined ? "allow more days to dewater, " : ""}or enclose the site with a cutoff wall (step 3).`);
 };
 
 // ------------------------------------------------------------------ design curves
