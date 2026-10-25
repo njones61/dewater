@@ -1275,10 +1275,18 @@ function drawSection() {
     svg.append("rect").attr("x", x(d) - wpx / 2).attr("width", wpx).attr("y", y(top)).attr("height", y(0) - y(top))
       .attr("fill", "#8e99a6").attr("stroke", "#1d2733").attr("stroke-width", 1);
   });
+  // each well near the line, with the water inside it: the head at the well's own radius, which
+  // the line seldom passes through (the drawdown curve plunges in the last meter). A well pumped
+  // dry is drawn red and labeled.
+  const hw = state.last.hw || [];
   near.forEach((w) => {
     const wt = terr ? tz(w.d) : st ? st.dbase : zTop;          // the casing reaches the ground
+    const dry = hw[w.i] <= 0, col = dry ? "#b3261e" : "#1F4E79";
     svg.append("rect").attr("x", x(w.d) - 3).attr("width", 6).attr("y", y(wt)).attr("height", y(0) - y(wt))
-      .attr("fill", "#fff").attr("stroke", "#1F4E79").attr("stroke-width", 1.5);
+      .attr("fill", "#fff").attr("stroke", col).attr("stroke-width", 1.5);
+    if (hw[w.i] > 0) svg.append("rect").attr("x", x(w.d) - 2).attr("width", 4).attr("y", y(hw[w.i])).attr("height", y(0) - y(hw[w.i])).attr("fill", "#7fb2d9");
+    if (dry) svg.append("text").attr("x", x(w.d)).attr("y", y(0) - 6).attr("text-anchor", "middle").attr("fill", col).attr("font-weight", 600)
+      .attr("paint-order", "stroke").attr("stroke", "#fff").attr("stroke-width", 4).text("Dry");
   });
   svg.append("text").attr("class", "axis-title").attr("x", m.l + 4).attr("y", Ht - 4).text("A");
   svg.append("text").attr("class", "axis-title").attr("x", Wd - m.r - 4).attr("y", Ht - 4).attr("text-anchor", "end").text("A′");
