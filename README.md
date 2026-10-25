@@ -15,7 +15,9 @@ Design a dewatering well system for an excavation in an unconfined aquifer, in t
    Q_min: the smallest total rate that dewaters the excavation.
 5. Check cross sections of the water level: east–west, north–south, or along any line you draw.
 6. Compute the design curves: Q_min against the number of wells, to choose how many wells to
-   use; against k; or against the days to dewater.
+   use; against k; or against the days to dewater. In transient flow each point is the design
+   for the deadline (the starting rate, cut back where needed), and the curves mark the fewest
+   wells and the shortest deadline the wells can meet.
 
 The ground elevation can be read from open terrain data (AWS Terrain Tiles; USGS 3DEP in the
 US), averaged over the excavation, and the cross section then shows the actual ground profile.

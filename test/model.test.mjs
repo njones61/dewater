@@ -171,6 +171,7 @@ test("the drawdown is cut back to keep the wells wet, and the deadline design me
   // a deadline between the fastest and the constant-rate one: met, starting below the fastest rate
   const tdays = Math.ceil(fast.tDew / 86400) + 2, dr = deadlineRate(pts, wells, pt, 35, tdays * 86400, 2 * tdays * 86400);
   assert.ok(dr.met && dr.tDew <= tdays * 86400 && dr.Q < fast.sched[0].Q);
+  assert.ok(dr.capped && dr.sched && dr.sched[0].Q === dr.Q);   // cut back, and the schedule comes with it
   // a deadline sooner than the fastest: not met, and the fastest is given
   const miss = deadlineRate(pts, wells, pt, 35, (fast.tDew / 86400 - 2) * 86400, 120 * 86400);
   assert.ok(!miss.met);

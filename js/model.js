@@ -303,16 +303,17 @@ export function pumpSchedule(checkPoints, wells, p, target, Q, tEnd, step = 7 * 
 // where they can't, the rate is cut back weekly and the start must be higher, found by bisection.
 // If even pumping as hard as the wells can go misses td, the result is that fastest schedule.
 // The search checks the points of the excavation where the water is highest (smallest influence
-// at td), then confirms with every check point. Returns {Q, met, tDew}.
+// at td), then confirms with every check point. Returns {Q, met, tDew, capped, sched}: sched is
+// the schedule found, or null for the constant rate (Q until td).
 export function deadlineRate(checkPoints, wells, p, target, td, tEnd) {
   const o = optimalRate(checkPoints, wells, { ...p, t: td }, target);
   if (!o || !isFinite(o.Q)) return null;
-  if (o.feasible) return { Q: o.Q, met: true, tDew: td };
+  if (o.feasible) return { Q: o.Q, met: true, tDew: td, capped: false, sched: null };
   const A = influence(checkPoints, wells, { ...p, t: td });
   const few = Array.from(A.keys()).sort((i, j) => A[i] - A[j]).slice(0, 150).map((i) => checkPoints[i]);
   const run = (Q, pts = few) => pumpSchedule(pts, wells, p, target, Q, tEnd);
   const fast = run(Infinity);
-  if (!(fast.tDew <= td)) { const f = run(Infinity, checkPoints); if (!(f.tDew <= td)) return { Q: f.sched[0].Q, met: false, tDew: f.tDew }; }
+  if (!(fast.tDew <= td)) { const f = run(Infinity, checkPoints); if (!(f.tDew <= td)) return { Q: f.sched[0].Q, met: false, tDew: f.tDew, capped: true, sched: f.sched }; }
   let lo = o.Q, hi = fast.sched[0].Q;
   for (let it = 0; it < 40 && hi - lo > 1e-3 * hi; it++) {
     const mid = 0.5 * (lo + hi);
@@ -320,10 +321,10 @@ export function deadlineRate(checkPoints, wells, p, target, td, tEnd) {
   }
   for (let it = 0; it < 20; it++) {                 // confirm with every check point
     const r = run(hi, checkPoints);
-    if (r.tDew <= td) return { Q: hi, met: true, tDew: r.tDew };
+    if (r.tDew <= td) return { Q: hi, met: true, tDew: r.tDew, capped: r.capped, sched: r.sched };
     hi *= 1.002;
   }
-  return { Q: hi, met: true, tDew: td };
+  return { Q: hi, met: true, tDew: td, capped: true, sched: null };
 }
 
 // A regular grid of points over a box, nx by ny, row by row from the top (y1) down, so it can be

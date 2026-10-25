@@ -218,8 +218,8 @@
       <!-- 6. Design curves -->
       <section class="step" id="step-curve">
         <h2><span class="num">7</span>Design curves</h2>
-        <label class="fieldlike"><span>Q<sub>min</sub> against</span>
-          <select id="in-curve-var"><option value="n" selected>Number of wells (rings at the offset above)</option><option value="k">Hydraulic conductivity, k (these wells)</option><option value="t">Days to dewater, t (these wells, transient)</option></select></label>
+        <label class="fieldlike"><span>Plot the design against</span>
+          <select id="in-curve-var"><option value="n" selected>Number of wells (rings at the offset above)</option><option value="k">Hydraulic conductivity, k (these wells)</option><option value="t">Days to dewater (these wells; transient or wall)</option></select></label>
         <div class="fields two" id="curve-n">
           <label>From n<input id="in-nmin" type="number" step="1" min="3" value="4"></label>
           <label>To n<input id="in-nmax" type="number" step="1" min="4" value="40"></label>
@@ -327,8 +327,10 @@
         fastest they can do and the day it takes. <b>Pumping schedule</b> plots the steps and gives
         the water pumped. The results give the day the excavation is dewatered, the bar
         under the map plays the contours and the section through time (up to twice the design
-        day), and the design curve gives Q<sub>min</sub>
-        against the days allowed: the less time, the more pumping. S<sub>y</sub> is taken as
+        day). The design curves plot the starting rate of the deadline design against the number
+        of wells (marking the fewest that can meet the deadline), against k (what a wrong guess at
+        k costs), and against the deadline, with the water pumped to dewater (marking the
+        shortest deadline the wells can meet). S<sub>y</sub> is taken as
         constant (no delayed yield at early times), and the drawdown should stay modest compared
         with H. A recharge boundary such as a river, or the edge of the aquifer, ends the growth;
         a steady R stands for that case.</p>
@@ -397,8 +399,9 @@
           you draw. It shows the water level against the static level and the required level, with
           the ground, the excavation, and the wells on the line.</li>
         <li>Use the design curves: Q<sub>min</sub> against the number of wells (rings at the
-          offset), against k for the wells on the map (or for the wall), or against the days of
-          pumping (transient flow, or the wall).</li>
+          offset), against k for the wells on the map (or for the wall), or against the days to
+          dewater (transient flow, or the wall). In transient flow each point is the design for
+          the deadline: the starting rate, cut back weekly where a well would otherwise go dry.</li>
       </ol>
       <p class="hint">Units: lengths are in meters or feet (the switch at the top of the panel);
         k and Q each have their own unit, and every flow rate in the results, the design curve,
@@ -414,6 +417,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-  <script type="module" src="js/app.js?v=39"></script>
+  <script type="module" src="js/app.js?v=40"></script>
 </body>
 </html>

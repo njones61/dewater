@@ -1,5 +1,5 @@
 // app.js — the map, the panel, and the drawing of results. The calculation is in model.js.
-import { heads, schedHeads, pumpSchedule, deadlineRate, optimalRate, reach, grid, inside, densify, wallCoeffs, wallLeak, wallOutside, wallSteady, wallDrainTime, wallQmin, wallLevelAt } from "./model.js?v=3";
+import { heads, schedHeads, pumpSchedule, deadlineRate, optimalRate, reach, grid, inside, densify, wallCoeffs, wallLeak, wallOutside, wallSteady, wallDrainTime, wallQmin, wallLevelAt } from "./model.js?v=4";
 import { elevations } from "./terrain.js";
 
 /* global L, turf, d3 */
@@ -194,6 +194,7 @@ $("in-R-method").addEventListener("change", () => { showR(); schedule(); });
 const flow = () => document.querySelector('input[name="flow"]:checked').value;
 function showFlow() {
   const tr = flow() === "transient";
+  syncCurveInputs();
   $("R-method-field").hidden = tr; $("R-field").hidden = tr;
   $("R-note").hidden = tr || $("in-R-method").value === "entered";
   ["tdays-field", "t-note"].forEach((id) => ($(id).hidden = !tr));
@@ -1516,6 +1517,10 @@ function syncCurveInputs() {
   const v = $("in-curve-var").value;
   $("curve-n").hidden = v !== "n"; $("curve-k").hidden = v !== "k"; $("curve-t").hidden = v !== "t";
   document.querySelectorAll(".uK").forEach((e) => (e.textContent = kUnitLabel()));
+  const tr = flow() === "transient" && !$("in-wall").checked;
+  if (tr) return void ($("curve-hint").textContent = v === "n" ? "The starting rate for the deadline (step 2) against the number of wells, and the fewest wells that can meet it."
+    : v === "t" ? "The starting rate, and the water pumped to dewater, against the deadline, for the wells on the map. The shortest deadline the wells can meet is marked."
+    : "The starting rate for the deadline (step 2) against k, for the wells on the map: what a wrong guess at k costs.");
   $("curve-hint").textContent = v === "n" ? "Past some n, more wells barely lower Q."
     : v === "t" ? "For the wells on the map (or the cutoff wall), with transient flow: the less time allowed, the more pumping."
     : "For the wells on the map. With R entered, Q is simply proportional to k; choose Sichardt or Kusakin for R to see how R's growth with k changes that.";
@@ -1527,7 +1532,7 @@ $("btn-curve").onclick = () => {
   if (!state.excavation) return setStatus("idle", "The design curve needs an excavation.");
   const cp = checkPoints(excRing().map(toXY));
   curveVar = $("in-curve-var").value;
-  curveRows = [];
+  curveRows = []; state.curveDeadline = false; curveRun++; $("btn-curve").textContent = "Compute the design curve";
   if (curveVar === "t") {
     const t0 = num("in-tmin") * 86400, t1 = num("in-tmax") * 86400;
     if (!(t0 > 0 && t1 > t0)) return alertMsg("Enter a range of days, smallest first.");
@@ -1537,6 +1542,7 @@ $("btn-curve").onclick = () => {
     if (wallOn() && !g) return alertMsg("Draw or load the cutoff wall first.");
     const wells = state.wells.map((w) => toXY(w.marker.getLatLng()));
     state.curveWall = wallOn();
+    if (!g) return deadlineCurve(cp, p, Array.from({ length: 21 }, (_, i) => t0 * (t1 / t0) ** (i / 20)), () => wells, (t) => ({ td: t }));
     for (let i = 0; i <= 30; i++) {
       const t = t0 * (t1 / t0) ** (i / 30), pt = p.t === undefined ? p : { ...p, t, R: reach({ ...p, t }) };
       if (g) curveRows.push({ x: t, Q: wallQmin(pt, { P: g.P, Aw: g.Aw, t: wp.t, kw: wp.kw, Sy: wp.Sy }, p.target, t), feasible: true });
@@ -1564,6 +1570,21 @@ $("btn-curve").onclick = () => {
     return;
   }
   state.curveWall = false;
+  if (p.t !== undefined) {
+    // transient: each point is the design for the deadline (model.js deadlineRate)
+    const td = tDesign();
+    if (curveVar === "n") {
+      const n0 = Math.max(1, Math.round(num("in-nmin"))), n1 = Math.round(num("in-nmax")), off = numL("in-offset");
+      if (!(n1 > n0)) return alertMsg("Enter a range of numbers of wells, smallest first.");
+      const ns = []; for (let n = n0; n <= Math.min(n1, n0 + 300); n++) ns.push(n);
+      return deadlineCurve(cp, p, ns, (n) => ringWells(n, off).map(toXY), () => ({ td }));
+    }
+    if (!state.wells.length) return alertMsg("Place or generate the wells first.");
+    const ku = K_UNITS[$("in-k-unit").value], k0 = num("in-kmin") * ku, k1 = num("in-kmax") * ku;
+    if (!(k0 > 0 && k1 > k0)) return alertMsg("Enter a range of k, smallest first.");
+    const wells = state.wells.map((w) => toXY(w.marker.getLatLng()));
+    return deadlineCurve(cp, p, Array.from({ length: 21 }, (_, i) => k0 * (k1 / k0) ** (i / 20)), () => wells, (k) => ({ td, k }));
+  }
   if (curveVar === "n") {
     const n0 = Math.max(1, Math.round(num("in-nmin"))), n1 = Math.round(num("in-nmax")), off = numL("in-offset");
     if (!(n1 > n0)) return alertMsg("Enter a range of numbers of wells, smallest first.");
@@ -1590,7 +1611,40 @@ $("btn-curve").onclick = () => {
   drawCurve();
   $("dlg-curve").showModal();
 };
+// The transient curves: for each x, the design for the deadline (model.js deadlineRate): the
+// starting rate, whether it is cut back to keep the wells wet, the day dewatered, and the water
+// pumped until then. Where even the fastest schedule misses the deadline, the row is marked missed.
+// A point takes up to a few seconds where the wells limit the rate, so the rows are computed one
+// at a time, with the count on the button; clicking again starts over.
+let curveRun = 0;
+function deadlineCurve(cp, p, xs, wellsOf, caseOf) {
+  const id = ++curveRun, btn = $("btn-curve"), label = "Compute the design curve";
+  curveRows = []; state.curveDeadline = true; state.curveTd = tDesign(); state.curveFast = null;
+  const step = (i) => {
+    if (id !== curveRun) return;
+    if (i === xs.length) {
+      btn.textContent = label;
+      // against the deadline: the fastest the wells can do, where the shortest deadlines miss
+      const miss = curveRows.filter((r) => !r.met);
+      if (curveVar === "t" && miss.length) state.curveFast = d3.min(miss, (r) => r.tDew) < Infinity ? d3.min(miss, (r) => r.tDew) : null;
+      $("dlg-curve").showModal();            // open first: the keys are laid out by their text widths
+      drawCurve();
+      return;
+    }
+    btn.textContent = `Computing\u2026 ${i + 1} of ${xs.length}`;
+    setTimeout(() => {
+      if (id !== curveRun) return;
+      const x = xs[i], c = caseOf(x), pk = c.k ? { ...p, k: c.k } : p, wells = wellsOf(x);
+      const d = deadlineRate(cp, wells, pk, p.target, c.td, Math.max(2 * c.td, 10 * 86400));
+      if (d) curveRows.push({ x, Q: d.Q, met: d.met, capped: d.capped, tDew: d.tDew, feasible: d.met,
+        vol: d.met ? (d.sched ? pumpedBy(d.sched, d.tDew) : d.Q * d.tDew) : NaN });
+      step(i + 1);
+    }, 0);
+  };
+  step(0);
+}
 function drawCurve() {
+  if (state.curveDeadline) return drawDeadlineCurve();
   const uq = Qf(), unit = Qn(), byK = curveVar === "k", byT = curveVar === "t", ku = K_UNITS[$("in-k-unit").value];
   const tr = flow() === "transient", auto = byK && !tr && params().Rmethod !== "entered", logX = byK || byT;
   const el = $("curve-chart");
@@ -1642,8 +1696,87 @@ function drawCurve() {
     + (dropDry ? ` Before day ${bad[bad.length - 1]}, Q<sub>min</sub> would pump a well dry (${bad.length} of ${curveRows.length} times); those are left off the plot.`
       : bad.length ? ` Red points: Q<sub>min</sub> would pump a well dry (${byK ? `${bad.length} of ${curveRows.length} values of k, from ${bad[0]} to ${bad[bad.length - 1]} ${kUnitLabel()}` : byT ? `${bad.length} of ${curveRows.length} times, from day ${bad[0]} to day ${bad[bad.length - 1]}` : `n = ${bad.join(", ")}`}).` : "");
 }
+// The transient curves: the starting rate of the deadline design, each point colored by whether the
+// rate stays constant until dewatered or is cut back to keep the wells wet. Against the deadline, the
+// water pumped to dewater on a second axis; a gray line marks the fewest wells, or the shortest
+// deadline, that the wells can meet. Every mark has its key above the plot.
+const CUT = "#c26a00", VOL = "#3a7d44";
+function drawDeadlineCurve() {
+  const uq = Qf(), unit = Qn(), byK = curveVar === "k", byT = curveVar === "t", ku = K_UNITS[$("in-k-unit").value], logX = byK || byT;
+  const el = $("curve-chart");
+  el.innerHTML = "";
+  const W = Math.min(720, window.innerWidth * 0.9), H = 380, m = { l: 70, r: byT ? 70 : 20, t: byT ? 58 : 40, b: 46 };
+  const ok = curveRows.filter((r) => r.met && isFinite(r.Q)), miss = curveRows.filter((r) => !r.met);
+  const xv = (r) => (byK ? r.x / ku : byT ? r.x / 86400 : r.x);
+  const xName = byK ? "hydraulic conductivity" : byT ? "deadline" : "number of wells";
+  $("curve-title").innerHTML = `Design curve: starting rate vs. ${xName}`;
+  const tdN = dayN(state.curveTd), nw = state.wells.length;
+  const setup = byT ? `The ${nw} wells on the map` : byK ? `The ${nw} wells on the map, dewatering by day ${tdN}` : `Rings at ${fmt(parseFloat($("in-offset").value), 1)} ${Ln()} from the edge, dewatering by day ${tdN}`;
+  const explain = ` Each point is the design for the deadline: the smallest starting rate that dewaters the excavation in time, cut back weekly where a well would otherwise go dry. After that a lower rate holds the water down.`;
+  const missNote = !miss.length ? "" : byT ? (state.curveFast ? ` The wells can't dewater in less than ${dayN(state.curveFast)} days, even pumping as hard as they can without going dry; shorter deadlines are left off.` : ` ${miss.length} of ${curveRows.length} deadlines can't be met even pumping as hard as the wells can; they are left off.`)
+    : byK ? ` For ${miss.length} of ${curveRows.length} values of k (${fmtNum(xv(miss[0]))} to ${fmtNum(xv(miss[miss.length - 1]))} ${kUnitLabel()}) the wells can't meet the deadline at any rate; they are left off.`
+    : ` With ${miss.length > 2 && miss[miss.length - 1].x - miss[0].x === miss.length - 1 ? `${miss[0].x} to ${miss[miss.length - 1].x}` : miss.map((r) => r.x).join(", ")} wells the deadline can't be met at any rate; they are left off.`;
+  $("curve-note").innerHTML = setup + "." + explain + missNote;
+  if (!ok.length) { el.textContent = "No point on the curve meets the deadline."; return; }
+  const x = (logX ? d3.scaleLog() : d3.scaleLinear()).domain(d3.extent(curveRows, xv)).range([m.l, W - m.r]);
+  const ys = ok.map((r) => r.Q / uq), lo = d3.min(ys), hi = d3.max(ys);
+  const y = logX ? d3.scaleLog().domain([lo / 1.1, hi * 1.1]).range([H - m.b, m.t])
+    : d3.scaleLinear().domain([Math.max(0, lo - 0.1 * (hi - lo || lo)), hi + 0.05 * (hi - lo || lo)]).nice().range([H - m.b, m.t]);
+  const svg = d3.select(el).append("svg").attr("class", "chart").attr("width", W).attr("height", H);
+  svg.append("g").attr("transform", `translate(0,${H - m.b})`).call(logX ? d3.axisBottom(x).ticks(6, "~g") : d3.axisBottom(x).ticks(10).tickFormat(d3.format("d")));
+  svg.append("g").attr("transform", `translate(${m.l},0)`).call(logX ? d3.axisLeft(y).ticks(6, "~g") : d3.axisLeft(y).ticks(8));
+  svg.append("g").attr("stroke", "#e5eaef").selectAll("line").data(y.ticks(8)).join("line")
+    .attr("x1", m.l).attr("x2", W - m.r).attr("y1", (d) => y(d)).attr("y2", (d) => y(d));
+  const keys = [];
+  // shaded: the range where the deadline can't be met
+  const x0 = x.domain()[0], first = d3.min(ok, xv), edge = byT && state.curveFast ? state.curveFast / 86400 : first;
+  if (miss.some((r) => xv(r) < first) && edge > x0) {
+    svg.insert("rect", ":first-child").attr("x", m.l).attr("y", m.t).attr("width", x(edge) - m.l).attr("height", H - m.b - m.t).attr("fill", "#eef1f4");
+    keys.push(["#eef1f4", "box", "Can't meet the deadline"]);
+  }
+  // the limit the wells set: the fewest wells, or the shortest deadline, they can meet
+  const lim = byT ? (state.curveFast ? state.curveFast / 86400 : null) : !byK && miss.length && miss[0].x < ok[0].x ? ok[0].x : null;
+  if (lim !== null && lim >= x.domain()[0]) {
+    svg.append("line").attr("x1", x(lim)).attr("x2", x(lim)).attr("y1", m.t).attr("y2", H - m.b).attr("stroke", "#8a96a3").attr("stroke-width", 1.5).attr("stroke-dasharray", "4,3");
+    svg.append("text").attr("x", x(lim) + 5).attr("y", H - m.b - 8).text(byT ? `Fastest possible: day ${fmtNum(+lim.toPrecision(3))}` : `Fewest wells: ${lim}`);
+  }
+  if (byT) {
+    const vf = Lf() ** 3, vs = ok.map((r) => r.vol / vf).filter((v) => v > 0);
+    const yv = d3.scaleLog().domain([d3.min(vs) / 1.1, d3.max(vs) * 1.1]).range([H - m.b, m.t]);
+    svg.append("g").attr("transform", `translate(${W - m.r},0)`).call(d3.axisRight(yv).ticks(6, "~s"));
+    svg.append("path").datum(ok.filter((r) => r.vol > 0)).attr("fill", "none").attr("stroke", VOL).attr("stroke-width", 2).attr("stroke-dasharray", "6,4")
+      .attr("d", d3.line().x((r) => x(xv(r))).y((r) => yv(r.vol / vf)));
+    svg.append("text").attr("class", "axis-title").attr("transform", `translate(${W - 12},${(m.t + H - m.b) / 2}) rotate(90)`).attr("text-anchor", "middle").text(`Water pumped to dewater (${Ln()}³)`);
+  }
+  svg.append("path").datum(ok).attr("fill", "none").attr("stroke", "#1F4E79").attr("stroke-width", 2.5)
+    .attr("d", d3.line().x((r) => x(xv(r))).y((r) => y(r.Q / uq)));
+  svg.append("g").selectAll("circle").data(ok).join("circle").attr("cx", (r) => x(xv(r))).attr("cy", (r) => y(r.Q / uq)).attr("r", 3.5)
+    .attr("fill", (r) => (r.capped ? CUT : "#1F4E79"))
+    .append("title").text((r) => `${byK ? `k = ${fmtNum(xv(r))} ${kUnitLabel()}` : byT ? `Day ${fmtNum(xv(r))}` : `${r.x} wells`}: start at ${fmtNum(r.Q / uq)} ${unit}${r.capped ? ", cut back weekly" : ", constant until dewatered"}; dewatered on day ${dayN(r.tDew)}; ${fmtVol(r.vol)} pumped to dewater`);
+  if (ok.some((r) => !r.capped)) keys.push(["#1F4E79", null, "Constant rate until dewatered"]);
+  if (ok.some((r) => r.capped)) keys.push([CUT, null, "Cut back weekly so no well runs dry"]);
+  if (byT) keys.push([VOL, "6,4", "Water pumped to dewater (right axis)"]);
+  // the keys in rows above the plot
+  let kx = m.l;
+  const lg0 = svg.append("g").attr("transform", `translate(0,${byT ? m.t - 40 : m.t - 22})`);
+  let lg = lg0.append("g");
+  keys.forEach(([c, dash, t]) => {
+    if (kx > m.l && kx + 40 + 6.5 * t.length > W - 10) { kx = m.l; lg = lg0.append("g").attr("transform", "translate(0,18)"); }
+    if (dash === "box") lg.append("rect").attr("x", kx).attr("y", -6).attr("width", 22).attr("height", 12).attr("fill", c).attr("stroke", "#c5ccd3");
+    else if (dash === null) lg.append("circle").attr("cx", kx + 6).attr("cy", 0).attr("r", 3.5).attr("fill", c);
+    else lg.append("line").attr("x1", kx).attr("x2", kx + 22).attr("y1", 0).attr("y2", 0).attr("stroke", c).attr("stroke-width", 2).attr("stroke-dasharray", dash);
+    const tx = lg.append("text").attr("x", kx + (dash === null ? 14 : 28)).attr("y", 4).text(t);
+    kx += (dash === null ? 14 : 28) + tx.node().getComputedTextLength() + 18;
+  });
+  svg.append("text").attr("class", "axis-title").attr("x", (m.l + W - m.r) / 2).attr("y", H - 8).attr("text-anchor", "middle").text(byK ? `Hydraulic conductivity, k (${kUnitLabel()})` : byT ? "Deadline, days to dewater" : "Number of wells, n");
+  svg.append("text").attr("class", "axis-title").attr("transform", `translate(16,${(m.t + H - m.b) / 2}) rotate(-90)`).attr("text-anchor", "middle").text(`Starting rate, Q (${unit})`);
+}
 $("btn-curve-csv").onclick = () => {
   const u = Qn().replace("³", "3").replace("/", "_per_"), ku = K_UNITS[$("in-k-unit").value], kn = kUnitLabel().replace("/", "_per_");
+  const vu = `${Ln()}3`;
+  const xcol = curveVar === "t" ? (r) => trim(r.x / 86400) : curveVar === "k" ? (r) => trim(r.x / ku) : (r) => r.x;
+  if (state.curveDeadline) return download("design_curve.csv", `${curveVar === "t" ? "deadline_days" : curveVar === "k" ? `k_${kn}` : "wells"},start_Q_${u},met,cut_back,dewatered_day,water_pumped_to_dewater_${vu}\n`
+    + curveRows.map((r) => `${xcol(r)},${trim(r.Q / Qf())},${r.met},${r.capped},${r.tDew < Infinity ? trim(r.tDew / 86400) : ""},${r.met ? trim(r.vol / Lf() ** 3) : ""}`).join("\n"), "text/csv");
   const csv = curveVar === "t" ? `days,Q_min_${u},feasible\n` + curveRows.map((r) => `${trim(r.x / 86400)},${trim(r.Q / Qf())},${r.feasible}`).join("\n")
     : curveVar === "k"
     ? `k_${kn},R_${Ln()},Q_min_${u},Q_min_R_fixed_${u},feasible\n` + curveRows.map((r) => `${trim(r.x / ku)},${trim(r.R / Lf())},${trim(r.Q / Qf())},${trim(r.Qfixed / Qf())},${r.feasible}`).join("\n")
