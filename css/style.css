@@ -179,7 +179,7 @@ button.small { font-size: 12px; padding: 2px 8px; }
 
 /* the time bar along the bottom of the map (transient flow) */
 .anim-bar { position: absolute; left: 0; right: 0; bottom: 0; z-index: 650; height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: rgba(255,255,255,.95); border-top: 1px solid var(--line); }
-.anim-bar input[type=range] { flex: 1; min-width: 60px; -webkit-appearance: none; appearance: none; height: 8px; border-radius: 4px; background: #d5dbe1; cursor: pointer; }
+.anim-bar input[type=range] { flex: 1; min-width: 60px; -webkit-appearance: none; appearance: none; height: 8px; border-radius: 4px; background: var(--navy); cursor: pointer; }
 .anim-bar input[type=range]::-moz-range-track { background: transparent; }
 .anim-bar input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--navy); border: 2px solid #fff; box-shadow: 0 0 0 1px var(--navy); }
 .anim-bar input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--navy); border: 2px solid #fff; box-shadow: 0 0 0 1px var(--navy); }

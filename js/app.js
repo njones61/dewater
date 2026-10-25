@@ -244,10 +244,10 @@ $("anim-play").onclick = () => {
 };
 $("anim-t").addEventListener("input", () => { stopAnim(); setView(toT(+$("anim-t").value)); });
 $("anim-design").onclick = () => { stopAnim(); state.viewT = null; run(); };
-// The time bar's colors: gray while the water is still above the required level, green from the
+// The time bar's colors: blue while the water is still above the required level, green from the
 // day the excavation is dewatered, red wherever a well is dry (sampled at 200 times along the
 // bar). Kept while the bar plays; recomputed when the design changes.
-const BAR = { wait: "#d5dbe1", dew: "#2fa866", dry: "#b3261e" };
+const BAR = { wait: "#1F4E79", dew: "#2fa866", dry: "#b3261e" };
 let barMemo = { key: null, r: null };
 function barStates(keyParts, tDew, dryAt) {
   const key = JSON.stringify(keyParts);
