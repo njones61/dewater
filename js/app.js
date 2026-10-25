@@ -1747,7 +1747,7 @@ function drawDeadlineCurve() {
   const uq = Qf(), unit = Qn(), byK = curveVar === "k", byT = curveVar === "t", ku = K_UNITS[$("in-k-unit").value], logX = byK;
   const el = $("curve-chart");
   el.innerHTML = "";
-  const W = Math.min(720, window.innerWidth * 0.9), H = 380, m = { l: 70, r: byT ? 70 : 20, t: byT ? 58 : 40, b: 46 };
+  const W = Math.min(720, window.innerWidth * 0.9), H = 380, m = { l: 70, r: byT ? 70 : 20, t: 0, b: 46 };
   const ok = curveRows.filter((r) => r.met && isFinite(r.Q)), miss = curveRows.filter((r) => !r.met);
   const xv = (r) => (byK ? r.x / ku : byT ? r.x / 86400 : r.x);
   const xName = byK ? "hydraulic conductivity" : byT ? "deadline" : "number of wells";
@@ -1760,23 +1760,39 @@ function drawDeadlineCurve() {
     : ` With ${miss.length > 2 && miss[miss.length - 1].x - miss[0].x === miss.length - 1 ? `${miss[0].x} to ${miss[miss.length - 1].x}` : miss.map((r) => r.x).join(", ")} wells the deadline can't be met at any rate; they are left off.`;
   $("curve-note").innerHTML = setup + "." + explain + missNote;
   if (!ok.length) { el.textContent = "No point on the curve meets the deadline."; return; }
+  const first = d3.min(ok, xv), band = byT ? !!state.curveFast : miss.some((r) => xv(r) < first);
+  const keys = [];
+  if (band) keys.push(["#eef1f4", "box", "Can't meet the deadline"]);
+  if (ok.some((r) => !r.capped)) keys.push(["#1F4E79", null, "Constant rate until dewatered"]);
+  if (ok.some((r) => r.capped)) keys.push([CUT, null, "Cut back weekly so no well runs dry"]);
+  if (byT) keys.push([VOL, "6,4", "Water pumped to dewater (right axis)"]);
+  // the keys first, in as many rows as they need across the plot's width; the plot starts below them
+  const svg = d3.select(el).append("svg").attr("class", "chart").attr("width", W).attr("height", H);
+  const lg = svg.append("g");
+  let kx = m.l, ky = 14;
+  keys.forEach(([c, dash, t]) => {
+    const g = lg.append("g"), tx = g.append("text").attr("x", dash === null ? 14 : 28).attr("y", 4).text(t);
+    const w = (dash === null ? 14 : 28) + tx.node().getComputedTextLength();
+    if (kx > m.l && kx + w > W - m.r) { kx = m.l; ky += 20; }
+    g.attr("transform", `translate(${kx},${ky})`);
+    if (dash === "box") g.append("rect").attr("x", 0).attr("y", -6).attr("width", 22).attr("height", 12).attr("fill", c).attr("stroke", "#c5ccd3");
+    else if (dash === null) g.append("circle").attr("cx", 6).attr("cy", 0).attr("r", 3.5).attr("fill", c);
+    else g.append("line").attr("x1", 0).attr("x2", 22).attr("y1", 0).attr("y2", 0).attr("stroke", c).attr("stroke-width", 2).attr("stroke-dasharray", dash);
+    kx += w + 22;
+  });
+  m.t = ky + 22;
   const x = (logX ? d3.scaleLog() : d3.scaleLinear()).domain(byT ? [0, d3.max(curveRows, xv)] : d3.extent(curveRows, xv)).range([m.l, W - m.r]);
   if (byT) x.nice();
   const ys = ok.map((r) => r.Q / uq), lo = d3.min(ys), hi = d3.max(ys);
   const y = logX ? d3.scaleLog().domain([lo / 1.1, hi * 1.1]).range([H - m.b, m.t])
     : d3.scaleLinear().domain([byT ? 0 : Math.max(0, lo - 0.1 * (hi - lo || lo)), hi + 0.05 * (hi - lo || lo)]).nice().range([H - m.b, m.t]);
-  const svg = d3.select(el).append("svg").attr("class", "chart").attr("width", W).attr("height", H);
   svg.append("g").attr("transform", `translate(0,${H - m.b})`).call(logX ? d3.axisBottom(x).ticks(6, "~g") : d3.axisBottom(x).ticks(10).tickFormat(d3.format("d")));
   svg.append("g").attr("transform", `translate(${m.l},0)`).call(logX ? d3.axisLeft(y).ticks(6, "~g") : d3.axisLeft(y).ticks(8));
   svg.append("g").attr("stroke", "#e5eaef").selectAll("line").data(y.ticks(8)).join("line")
     .attr("x1", m.l).attr("x2", W - m.r).attr("y1", (d) => y(d)).attr("y2", (d) => y(d));
-  const keys = [];
   // shaded: the range where the deadline can't be met
-  const x0 = x.domain()[0], first = d3.min(ok, xv), edge = byT && state.curveFast ? state.curveFast / 86400 : first;
-  if ((byT ? !!state.curveFast : miss.some((r) => xv(r) < first)) && edge > x0) {
-    svg.insert("rect", ":first-child").attr("x", m.l).attr("y", m.t).attr("width", x(edge) - m.l).attr("height", H - m.b - m.t).attr("fill", "#eef1f4");
-    keys.push(["#eef1f4", "box", "Can't meet the deadline"]);
-  }
+  const edge = byT && state.curveFast ? state.curveFast / 86400 : first;
+  if (band) svg.insert("rect", ":first-child").attr("x", m.l).attr("y", m.t).attr("width", x(edge) - m.l).attr("height", H - m.b - m.t).attr("fill", "#eef1f4");
   // the limit the wells set: the fewest wells, or the shortest deadline, they can meet
   const lim = byT ? (state.curveFast ? state.curveFast / 86400 : null) : !byK && miss.length && miss[0].x < ok[0].x ? ok[0].x : null;
   if (lim !== null && lim >= x.domain()[0]) {
@@ -1796,21 +1812,6 @@ function drawDeadlineCurve() {
   svg.append("g").selectAll("circle").data(ok).join("circle").attr("cx", (r) => x(xv(r))).attr("cy", (r) => y(r.Q / uq)).attr("r", 3.5)
     .attr("fill", (r) => (r.capped ? CUT : "#1F4E79"))
     .append("title").text((r) => `${byK ? `k = ${fmtNum(xv(r))} ${kUnitLabel()}` : byT ? `Day ${fmtNum(xv(r))}` : `${r.x} wells`}: start at ${fmtNum(r.Q / uq)} ${unit}${r.capped ? ", cut back weekly" : ", constant until dewatered"}; dewatered on day ${dayN(r.tDew)}; ${fmtVol(r.vol)} pumped to dewater`);
-  if (ok.some((r) => !r.capped)) keys.push(["#1F4E79", null, "Constant rate until dewatered"]);
-  if (ok.some((r) => r.capped)) keys.push([CUT, null, "Cut back weekly so no well runs dry"]);
-  if (byT) keys.push([VOL, "6,4", "Water pumped to dewater (right axis)"]);
-  // the keys in rows above the plot
-  let kx = m.l;
-  const lg0 = svg.append("g").attr("transform", `translate(0,${byT ? m.t - 40 : m.t - 22})`);
-  let lg = lg0.append("g");
-  keys.forEach(([c, dash, t]) => {
-    if (kx > m.l && kx + 40 + 6.5 * t.length > W - 10) { kx = m.l; lg = lg0.append("g").attr("transform", "translate(0,18)"); }
-    if (dash === "box") lg.append("rect").attr("x", kx).attr("y", -6).attr("width", 22).attr("height", 12).attr("fill", c).attr("stroke", "#c5ccd3");
-    else if (dash === null) lg.append("circle").attr("cx", kx + 6).attr("cy", 0).attr("r", 3.5).attr("fill", c);
-    else lg.append("line").attr("x1", kx).attr("x2", kx + 22).attr("y1", 0).attr("y2", 0).attr("stroke", c).attr("stroke-width", 2).attr("stroke-dasharray", dash);
-    const tx = lg.append("text").attr("x", kx + (dash === null ? 14 : 28)).attr("y", 4).text(t);
-    kx += (dash === null ? 14 : 28) + tx.node().getComputedTextLength() + 18;
-  });
   svg.append("text").attr("class", "axis-title").attr("x", (m.l + W - m.r) / 2).attr("y", H - 8).attr("text-anchor", "middle").text(byK ? `Hydraulic conductivity, k (${kUnitLabel()})` : byT ? "Deadline, days to dewater" : "Number of wells, n");
   svg.append("text").attr("class", "axis-title").attr("transform", `translate(16,${(m.t + H - m.b) / 2}) rotate(-90)`).attr("text-anchor", "middle").text(`Starting rate, Q (${unit})`);
 }
