@@ -654,31 +654,31 @@ function run() {
   const tr = p.t !== undefined, td = tDesign();
   const plan = tr && ring ? scheduleFor(cp, wells, p) : null, sched = plan && plan.sched, tDew = plan ? plan.tDew : NaN;
   const wpts = wells.map((w) => ({ x: w.x + p.rw, y: w.y }));
-  const headsAt = (pts, fast) => (sched ? schedHeads(pts, wells, p, sched, fast) : heads(pts, W, p));
+  // the one solution: the water level at any points, at time t (the day shown unless given).
+  // The map, the excavation check, the wells, the color scale, and the section all read it.
+  const headAt = (pts, t = p.t, fast = false) => (sched ? schedHeads(pts, wells, { ...p, t }, sched, fast) : heads(pts, W, { ...p, t })).h;
   const qNow = sched ? rateAt(sched, p.t) : p.Q;
 
   // the results grid
   const box = analysisBox([...(ring || []), ...wells]);
   const nx = 220, ny = Math.round(nx * (box[3] - box[2]) / (box[1] - box[0]));
   const G = grid(box, nx, ny);
-  const { h } = headsAt(G, true);
+  const h = headAt(G, p.t, true);
 
   // the excavation: the highest head inside it
   let hmax = null, at = null;
   if (ring) {
-    const hc = headsAt(cp).h;
+    const hc = headAt(cp);
     hmax = -Infinity;
     hc.forEach((v, i) => { if (v > hmax) { hmax = v; at = cp[i]; } });
   }
   // the wells: the head at each well's radius
-  const hw = headsAt(wpts).h;
+  const hw = headAt(wpts);
   const dryWells = [];
   hw.forEach((v, i) => { state.wells[i].marker.setIcon(wellIcon(v <= 0)); if (v <= 0) dryWells.push(i); });
 
-  const hEnd = () => (sched ? schedHeads(G, wells, { ...p, t: td }, sched, true).h : heads(G, W, { ...p, t: td }).h);
-  // the section follows the schedule too, not the starting rate held constant
-  state.last = { p, box, nx, ny, h, ring, wells, hmax, at, hw, qEach, sched, tDew, qNow, capped: plan && plan.capped,
-    headAt: sched ? (pts) => schedHeads(pts, wells, p, sched).h : null,
+  const hEnd = () => headAt(G, td, true);
+  state.last = { p, box, nx, ny, h, ring, wells, hmax, at, hw, qEach, sched, tDew, qNow, capped: plan && plan.capped, headAt,
     hRange: tr ? spanRange(["w", p.Q, p.k, p.H, p.Sy, p.rw, wells, box, td, tEnd()], hEnd) : null };
   drawResults();
   drawSection();
@@ -1292,8 +1292,7 @@ function drawSection() {
   L.polyline([A, B], { color: "#1d2733", weight: 2.5, dashArray: "8,5", interactive: false }).addTo(secLayer);
   [["A", A], ["A′", B]].forEach(([t, ll]) => L.tooltip({ permanent: true, direction: "center", className: "sec-label", interactive: false }).setLatLng(ll).setContent(t).addTo(secLayer));
 
-  const { p, wells, qEach, ring, wall } = state.last;
-  const W = wells.map((w) => ({ ...w, q: qEach }));
+  const { p, wells, ring, wall } = state.last;
   const N = 400, ux = (b.x - a.x) / len, uy = (b.y - a.y) / len;
   // evenly spaced points, plus points closing in on each well the line passes: the water drops
   // steeply in the last few meters, which even spacing steps over
@@ -1306,7 +1305,7 @@ function drawSection() {
   });
   const dd = [...new Set(ds.filter((d) => d >= 0 && d <= len))].sort((u, v) => u - v);
   const pts = dd.map((d) => ({ x: a.x + ux * d, y: a.y + uy * d }));
-  const h = state.last.headAt ? state.last.headAt(pts) : heads(pts, W, p).h;
+  const h = state.last.headAt(pts);         // the same solution as the map
   const prof = pts.map((q, i) => ({ d: dd[i], h: h[i], inExc: ring ? inside(q, ring) : false, inWall: wall ? inside(q, wall.ring) : false }));
   state.secData = { prof, st: p.site };
   // wells within a few percent of the line's length of it, at their place along it
