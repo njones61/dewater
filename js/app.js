@@ -1154,7 +1154,20 @@ function centerSection(dir) {
   const xs = xy.map((p) => p.x), ys = xy.map((p) => p.y);
   const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), 20);
   const half = 0.5 * span + Math.max(0.9 * span, 60);
-  const [a, b] = dir === "ew" ? [{ x: c.x - half, y: c.y }, { x: c.x + half, y: c.y }] : [{ x: c.x, y: c.y + half }, { x: c.x, y: c.y - half }];
+  let [a, b] = dir === "ew" ? [{ x: c.x - half, y: c.y }, { x: c.x + half, y: c.y }] : [{ x: c.x, y: c.y + half }, { x: c.x, y: c.y - half }];
+  // through the wells exactly: the water drops to a well's level only within its radius, so a line
+  // even half a meter off misses a dry well. The line runs through the well nearest the center
+  // line on each side (tilting a little when they don't line up), or is shifted across to the one
+  // well when one side has none.
+  const k = dir === "ew" ? "y" : "x", j = dir === "ew" ? "x" : "y";
+  const wl = state.wells.map((w) => toXY(w.marker.getLatLng()));
+  const pick = (side) => wl.filter((v) => (side < 0 ? v[j] < c[j] : v[j] > c[j]))
+    .reduce((u, v) => (!u || Math.abs(v[k] - c[k]) < Math.abs(u[k] - c[k]) ? v : u), null);
+  const w1 = pick(dir === "ew" ? -1 : 1), w2 = pick(dir === "ew" ? 1 : -1);
+  if (w1 && w2) {
+    const L0 = Math.hypot(w2.x - w1.x, w2.y - w1.y), ex = (w2.x - w1.x) / L0, ey = (w2.y - w1.y) / L0, m0 = { x: (w1.x + w2.x) / 2, y: (w1.y + w2.y) / 2 };
+    [a, b] = [{ x: m0.x - ex * half, y: m0.y - ey * half }, { x: m0.x + ex * half, y: m0.y + ey * half }];
+  } else if (w1 || w2) { a[k] = b[k] = (w1 || w2)[k]; }
   setSection(toLL(a), toLL(b));
 }
 $("btn-sec-ew").onclick = () => centerSection("ew");
@@ -1182,9 +1195,19 @@ function drawSection() {
   const { p, wells, qEach, ring, wall } = state.last;
   const W = wells.map((w) => ({ ...w, q: qEach }));
   const N = 400, ux = (b.x - a.x) / len, uy = (b.y - a.y) / len;
-  const pts = d3.range(N + 1).map((i) => ({ x: a.x + ux * len * i / N, y: a.y + uy * len * i / N }));
+  // evenly spaced points, plus points closing in on each well the line passes: the water drops
+  // steeply in the last few meters, which even spacing steps over
+  const ds = d3.range(N + 1).map((i) => len * i / N);
+  wells.forEach((w) => {
+    const d = (w.x - a.x) * ux + (w.y - a.y) * uy;
+    if (d < 0 || d > len || Math.abs(-(w.x - a.x) * uy + (w.y - a.y) * ux) > 0.04 * len) return;
+    ds.push(d);
+    [1, 1.5, 2, 3, 5, 8, 13, 20, 35, 60, 100].forEach((f) => ds.push(d - f * p.rw, d + f * p.rw));
+  });
+  const dd = [...new Set(ds.filter((d) => d >= 0 && d <= len))].sort((u, v) => u - v);
+  const pts = dd.map((d) => ({ x: a.x + ux * d, y: a.y + uy * d }));
   const h = state.last.headAt ? state.last.headAt(pts) : heads(pts, W, p).h;
-  const prof = pts.map((q, i) => ({ d: len * i / N, h: h[i], inExc: ring ? inside(q, ring) : false, inWall: wall ? inside(q, wall.ring) : false }));
+  const prof = pts.map((q, i) => ({ d: dd[i], h: h[i], inExc: ring ? inside(q, ring) : false, inWall: wall ? inside(q, wall.ring) : false }));
   state.secData = { prof, st: p.site };
   // wells within a few percent of the line's length of it, at their place along it
   const near = wells.map((w, i) => ({ i, d: (w.x - a.x) * ux + (w.y - a.y) * uy, off: Math.abs(-(w.x - a.x) * uy + (w.y - a.y) * ux) }))
@@ -1305,7 +1328,7 @@ function drawSection() {
   const inEx = prof.filter((q) => q.inExc);
   if (inEx.length) {
     const top = inEx.reduce((u, v) => (v.h > u.h ? v : u));
-    svg.append("circle").attr("cx", x(top.d)).attr("cy", y(top.h)).attr("r", 4.5).attr("fill", top.h > p.target ? "#b3261e" : "#1e7a46");
+    svg.append("circle").attr("cx", x(top.d)).attr("cy", y(top.h)).attr("r", 4.5).attr("fill", top.h > p.target + 0.005 ? "#b3261e" : "#1e7a46");
     // to the right of the point, on a white backing so it reads over any line
     const right = x(top.d) < (m.l + Wd - m.r) / 2;
     svg.append("text").attr("x", x(top.d) + (right ? 9 : -9)).attr("y", y(top.h) - 7).attr("text-anchor", right ? "start" : "end").attr("fill", "#1d2733")
