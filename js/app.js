@@ -942,7 +942,9 @@ function drawResults() {
   $("legend").innerHTML = `<h4>${title}</h4><div class="bar" style="background:linear-gradient(to right, ${stops.join(",")})"></div>`
     + `<div class="ticks"><span>${fmt(drier ? lo : hi, 1)}</span><span>${fmt(drier ? hi : lo, 1)}</span></div>`
     + `<div class="key"><span class="sw" style="background:#E8582C;height:3px"></span>Required level</div>`
-    + ($("in-dewatered").checked ? `<div class="key"><span class="sw" style="background:rgba(47,168,102,.35);border:1px dashed #1e7a46"></span>Below the required level</div>` : "");
+    + ($("in-dewatered").checked ? `<div class="key"><span class="sw" style="background:rgba(47,168,102,.35);border:1px dashed #1e7a46"></span>Below the required level</div>` : "")
+    + (last.hw && last.hw.some((v) => v <= 0) ? `<div class="key"><span class="sw dot" style="background:#b3261e"></span>Well pumped dry</div>` : "")
+    + (last.at && last.hmax > p.target ? `<div class="key"><span class="sw dot" style="border:2.5px solid #b3261e"></span>Highest water in the excavation</div>` : "");
   $("legend").hidden = false;
 }
 const levelDigits = (lv) => (lv.length > 1 && lv[1] - lv[0] < 1 ? 1 : 0);
@@ -1472,10 +1474,15 @@ function drawCurve() {
   svg.append("g").selectAll("circle").data(ok).join("circle").attr("cx", (r) => x(xv(r))).attr("cy", (r) => y(r.Q / uq)).attr("r", 3.5)
     .attr("fill", (r) => (r.feasible ? "#1F4E79" : "#b3261e"))
     .append("title").text((r) => `${byK ? `k = ${fmtNum(xv(r))} ${kUnitLabel()}${tr ? "" : `, R = ${fmtL(r.R, 0)}`}` : byT ? `${fmtNum(xv(r))} days` : `${r.x} wells`}: Q = ${fmtNum(r.Q / uq)} ${unit}${r.feasible ? "" : " (a well runs dry)"}`);
-  if (auto) {
-    const lg = svg.append("g").attr("transform", `translate(${m.l + 12},${m.t + 8})`);
-    [["#1F4E79", "", `R from ${params().Rmethod === "sichardt" ? "Sichardt" : "Kusakin"} (grows with √k)`], ["#8a96a3", "6,4", `R fixed at ${fmtL(state.curveRfix, 0)}`]].forEach(([c, dash, t], i) => {
-      lg.append("line").attr("x1", 0).attr("x2", 26).attr("y1", i * 18).attr("y2", i * 18).attr("stroke", c).attr("stroke-width", 2.5).attr("stroke-dasharray", dash);
+  // legend: the two R curves, and the red points when any are plotted
+  const keys = auto ? [["#1F4E79", "", `R from ${params().Rmethod === "sichardt" ? "Sichardt" : "Kusakin"} (grows with √k)`], ["#8a96a3", "6,4", `R fixed at ${fmtL(state.curveRfix, 0)}`]] : [];
+  if (ok.some((r) => !r.feasible)) keys.push(["#b3261e", null, "A well runs dry"]);
+  if (keys.length) {
+    // Q falls with n and t, so their curves start top left: their key goes top right
+    const lg = svg.append("g").attr("transform", `translate(${auto ? m.l + 12 : W - m.r - 135},${m.t + 8})`);
+    keys.forEach(([c, dash, t], i) => {
+      if (dash === null) lg.append("circle").attr("cx", 13).attr("cy", i * 18).attr("r", 3.5).attr("fill", c);
+      else lg.append("line").attr("x1", 0).attr("x2", 26).attr("y1", i * 18).attr("y2", i * 18).attr("stroke", c).attr("stroke-width", 2.5).attr("stroke-dasharray", dash);
       lg.append("text").attr("x", 32).attr("y", i * 18 + 4).text(t);
     });
   }
