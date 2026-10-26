@@ -35,9 +35,13 @@ function fitSite() {
   // results, the excavation and the wells
   if (state.last && state.origin) {
     const [x0, x1, y0, y1] = state.last.box;
-    // centered in the part of the map not covered by the time bar
-    const bar = $("anim-bar").hidden ? 0 : $("anim-bar").offsetHeight;
-    return map.fitBounds(L.latLngBounds(toLL({ x: x0, y: y0 }), toLL({ x: x1, y: y1 })), { paddingTopLeft: [8, 8], paddingBottomRight: [8, 8 + bar], maxZoom: 19 });
+    // filling the part of the map the time bar doesn't cover, whatever its size: the zoom goes
+    // between the map's whole steps (its tiles drawn a pixel large, so no seams show)
+    const bar = $("anim-bar").hidden ? 0 : $("anim-bar").offsetHeight, snap = map.options.zoomSnap;
+    map.options.zoomSnap = 0;
+    map.fitBounds(L.latLngBounds(toLL({ x: x0, y: y0 }), toLL({ x: x1, y: y1 })), { paddingTopLeft: [8, 8], paddingBottomRight: [8, 8 + bar], maxZoom: 19 });
+    map.options.zoomSnap = snap;
+    return;
   }
   let b = null;
   const add = (x) => { b = b ? b.extend(x) : L.latLngBounds(x, x); };

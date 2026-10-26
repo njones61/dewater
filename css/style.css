@@ -195,3 +195,6 @@ button.small { font-size: 12px; padding: 2px 8px; }
 #wall-box > .seg.small { margin: 0 0 4px; }
 #wall-box .fields { margin: 8px 0; }
 .switch.sec-wells { height: 30px; margin-top: 8px; }
+/* map tiles between whole zoom levels: an invisible outline makes the browser blend their edges,
+   so no hairline seams show where they meet */
+.leaflet-tile { outline: 1px solid transparent; }
