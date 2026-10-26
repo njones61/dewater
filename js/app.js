@@ -604,12 +604,14 @@ $("btn-wall-edit").onclick = () => {
 };
 $("btn-wall-delete").onclick = () => {
   // also cancels a wall still being drawn (a polygon is finished only on its first corner)
-  if (state.wallDrawing) { map.pm.disableDraw(); state.wallDrawing = false; tip(null); }
-  if (!state.wall) return;
-  if (state.wall.pm.enabled()) state.wall.pm.disable();
-  map.removeLayer(state.wall); state.wall = null;
-  $("btn-wall-edit").textContent = "Edit"; tip(null);
-  schedule();
+  map.pm.disableDraw(); state.wallDrawing = false; tip(null);
+  if (state.wall && state.wall.pm.enabled()) state.wall.pm.disable();
+  if (state.wall) map.removeLayer(state.wall);
+  state.wall = null;
+  // and any other wall line left on the map (a drawing interrupted midway)
+  map.eachLayer((l) => { if (l instanceof L.Path && l.options && l.options.color === WALL_STYLE.color && !wallLayer.hasLayer(l)) map.removeLayer(l); });
+  $("btn-wall-edit").textContent = "Edit";
+  schedule();                             // saves the project without the wall
 };
 $("file-wall").onchange = (e) => readFile(e.target.files[0], (t) => { const r = geojsonRing(JSON.parse(t)); if (r) setWall(L.polygon(r).addTo(map)); });
 $("btn-wall-export").onclick = () => {
@@ -1021,7 +1023,9 @@ function drawResults() {
       const flush = () => {
         if (seg.length > 2) {
           const ll = seg.map(toWorld);
-          L.polyline(ll, { pane: "results", color: major ? "#E8582C" : "#1d2733", weight: major ? 2.5 : 1, opacity: 0.85, dashArray: major ? "7,5" : null, interactive: false }).addTo(lines);
+          // the required level: thick dashed orange on a white halo, so it stands out from the colors
+          if (major) L.polyline(ll, { pane: "results", color: "#fff", weight: 7, opacity: 0.9, interactive: false }).addTo(lines);
+          L.polyline(ll, { pane: "results", color: major ? "#E8582C" : "#1d2733", weight: major ? 4 : 1, opacity: major ? 1 : 0.85, dashArray: major ? "10,6" : null, interactive: false }).addTo(lines);
           exportLines.push({ value: c.value, coords: ll.map((q) => [q.lng, q.lat]) });
           if (seg.length > 12) {
             L.tooltip({ permanent: true, direction: "center", className: "contour-label", interactive: false })
@@ -1062,7 +1066,7 @@ function drawResults() {
     + key(`<circle cx="12" cy="7" r="5" fill="#1F4E79" stroke="#fff" stroke-width="2"/><circle cx="12" cy="7" r="6.2" fill="none" stroke="#1F4E79" stroke-width="1"/>`, "Pumping well")
     + (last.wall ? key(`<line x1="1" y1="7" x2="23" y2="7" stroke="#fff" stroke-width="7"/><line x1="1" y1="7" x2="23" y2="7" stroke="#3d4550" stroke-width="4"/>`, "Cutoff wall") : "")
     + key(`<line x1="1" y1="7" x2="23" y2="7" stroke="#1d2733" stroke-width="1"/>`, `Contours, labeled in ${Ln()}`)
-    + key(`<line x1="1" y1="7" x2="23" y2="7" stroke="#E8582C" stroke-width="2.5" stroke-dasharray="7,5"/>`, "Water at the required level (excavation bottom plus any extra depth)")
+    + key(`<line x1="0" y1="7" x2="24" y2="7" stroke="#fff" stroke-width="7"/><line x1="0" y1="7" x2="24" y2="7" stroke="#E8582C" stroke-width="4" stroke-dasharray="10,6"/>`, "Water at the required level (excavation bottom plus any extra depth)")
     + ($("in-dewatered").checked ? `<div class="key"><span class="sw" style="background:rgba(47,168,102,.35);border:1px dashed #1e7a46"></span>Below the required level</div>` : "")
     + (last.hw && last.hw.some((v) => v <= 0) ? key(`<circle cx="12" cy="7" r="5" fill="#b3261e" stroke="#fff" stroke-width="2"/><circle cx="12" cy="7" r="6.2" fill="none" stroke="#b3261e" stroke-width="1"/>`, "Well pumped dry") : "")
     + (state.section ? key(`<line x1="1" y1="7" x2="23" y2="7" stroke="#1d2733" stroke-width="2.5" stroke-dasharray="6,4"/>`, "Cross section line A–A′") : "")
