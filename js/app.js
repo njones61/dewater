@@ -1,5 +1,5 @@
 // app.js — the map, the panel, and the drawing of results. The calculation is in model.js.
-import { heads, schedHeads, pumpSchedule, deadlineRate, optimalRate, reach, grid, inside, densify, wallCoeffs, wallLeak, wallOutside, wallSteady, wallDrainTime, wallQmin, wallLevelAt } from "./model.js?v=4";
+import { heads, schedHeads, sinkBins, binnedHeads, pumpSchedule, deadlineRate, optimalRate, reach, grid, inside, densify, wallCoeffs, wallLeak, wallOutside, wallSteady, wallDrainTime, wallQmin, wallLevelAt } from "./model.js?v=6";
 import { elevations } from "./terrain.js";
 
 /* global L, turf, d3 */
@@ -883,6 +883,7 @@ $("btn-sched-csv").onclick = () => {
 // required level once it is drawn down (or, if Q can't get it there, at the level Q holds); the
 // map and the section show that state. Outside, the leakage is drawn in along the wall: sinks
 // spaced along it, superposed as for wells.
+let wallBins = { key: null, b: null };
 function runWall(p, ring, wells) {
   const g = wallGeom(), wp = wallParams();
   if (!g) return setStatus("idle", "Draw or load the cutoff wall, or place it at an offset from the edge.");
@@ -899,11 +900,21 @@ function runWall(p, ring, wells) {
   const leak = wallLeak(hHold, p, w), hOut = wallOutside(hHold, p, w);
   const sp = Math.max(g.P / 600, 0.5);
   const sinks = densify(g.ring, sp), S = sinks.map((q) => ({ ...q, q: leak / sinks.length })), pOut = { ...p, rw: sp / 2 };
-  const headAt = (pts) => { const h = heads(pts, S, pOut).h; pts.forEach((q, i) => { if (inside(q, g.ring)) h[i] = hHold; }); return h; };
+  // the one solution with the wall (fast: the W(u) table, for the map grid)
+  const headAt = (pts, t, fast = false) => { const h = heads(pts, S, pOut, fast).h; pts.forEach((q, i) => { if (inside(q, g.ring)) h[i] = hHold; }); return h; };
 
   const box = analysisBox([...g.ring, ...wells]);
   const nx = 220, ny = Math.round(nx * (box[3] - box[2]) / (box[1] - box[0]));
-  const h = headAt(grid(box, nx, ny));
+  // the map grid in transient flow: the sinks binned by distance once per layout, then summed by
+  // bin at each time (model.js sinkBins), so the bar plays smoothly
+  const G = grid(box, nx, ny);
+  let h;
+  if (tr) {
+    const key = JSON.stringify([box, nx, ny, g.ring, sp, pOut.rw]);
+    if (wallBins.key !== key) wallBins = { key, b: sinkBins(G, sinks, pOut.rw) };
+    h = binnedHeads(wallBins.b, leak / sinks.length, pOut).h;
+    G.forEach((q, i) => { if (inside(q, g.ring)) h[i] = hHold; });
+  } else h = headAt(G, p.t, true);
   const n = wells.length, qEach = n ? p.Q / n : 0, hw = wells.map(() => hHold);
   state.wells.forEach((wl) => wl.marker.setIcon(wellIcon(false)));
   const hRange = tr ? spanRange(["wall", p.Q, p.k, p.H, p.Sy, p.rw, g.ring, w, box, tDesign()], () => {

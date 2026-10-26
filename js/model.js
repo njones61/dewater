@@ -56,10 +56,10 @@ export function wellW(u) {
 // The kernel of one well at distance r, per unit rate in units of 1/(πk): ln(R/r) in steady flow
 // (r clamped to [r_w, R]), W(u)/2 in transient flow (r no less than r_w).
 export const transient = (p) => p.t > 0 && p.Sy > 0;
-export function kernel(p) {
+export function kernel(p, fast = false) {
   if (transient(p)) {
-    const c = p.Sy / (4 * p.k * p.H * p.t), rw = p.rw;
-    return (r) => { const rr = Math.max(r, rw); return 0.5 * wellW(rr * rr * c); };
+    const c = p.Sy / (4 * p.k * p.H * p.t), rw = p.rw, Wf = fast ? wellWFast : wellW;
+    return (r) => { const rr = Math.max(r, rw); return 0.5 * Wf(rr * rr * c); };
   }
   const R = p.R, rw = p.rw;
   return (r) => Math.log(R / Math.min(Math.max(r, rw), R));
@@ -87,9 +87,9 @@ export function influence(points, wells, p) {
 
 // Heads with each well pumping its own rate w.q (m³/s). Returns {h, dry}: h is 0 where the
 // aquifer would be pumped dry (H² − Σ < 0), and dry counts those points.
-export function heads(points, wells, p) {
+export function heads(points, wells, p, fast = false) {
   const h = new Float64Array(points.length);
-  const c = 1 / (Math.PI * p.k), H2 = p.H * p.H, f = kernel(p);
+  const c = 1 / (Math.PI * p.k), H2 = p.H * p.H, f = kernel(p, fast);
   let dry = 0;
   for (let j = 0; j < points.length; j++) {
     const { x, y } = points[j];
@@ -165,6 +165,38 @@ function wellWFast(u) {
   if (f < 0) return wellW(u);
   const i = Math.floor(f), g = f - i;
   return WT[i] + g * (WT[i + 1] - WT[i]);
+}
+
+// Many equal sinks (the leakage along a cutoff wall) seen from many points, through time: the
+// distances don't change, only W(u)'s time factor does. So each point's sinks are counted once
+// into log-spaced bins of r² (with the mean ln r² of each bin), and the heads at any time sum the
+// bins instead of the sinks: W varies smoothly across a bin, a ratio of 1.1 or so in r.
+export function sinkBins(points, sinks, rw, nb = 48) {
+  let r2max = rw * rw;
+  const n = points.length, cnt = new Float32Array(n * nb), mlr = new Float32Array(n * nb);
+  for (const q of points) for (const s of sinks) r2max = Math.max(r2max, (q.x - s.x) ** 2 + (q.y - s.y) ** 2);
+  const lo = Math.log(rw * rw), span = Math.log(r2max) - lo + 1e-9;
+  for (let j = 0; j < n; j++) {
+    const { x, y } = points[j], o = j * nb;
+    for (const s of sinks) {
+      const lr = Math.log(Math.max((x - s.x) ** 2 + (y - s.y) ** 2, rw * rw)), b = Math.min(nb - 1, Math.floor((lr - lo) / span * nb));
+      cnt[o + b]++; mlr[o + b] += lr;
+    }
+    for (let b = 0; b < nb; b++) if (cnt[o + b]) mlr[o + b] /= cnt[o + b];
+  }
+  return { n, nb, cnt, mlr };
+}
+// Heads at time p.t (transient) from sinkBins, each sink taking q. As heads, with the W(u) table.
+export function binnedHeads(bins, q, p) {
+  const { n, nb, cnt, mlr } = bins, h = new Float64Array(n), H2 = p.H * p.H, c = p.Sy / (4 * p.k * p.H * p.t), f = q / (Math.PI * p.k);
+  let dry = 0;
+  for (let j = 0; j < n; j++) {
+    let s = 0;
+    for (let b = j * nb, e = b + nb; b < e; b++) if (cnt[b]) s += cnt[b] * 0.5 * wellWFast(Math.exp(mlr[b]) * c);
+    const v = H2 - s * f;
+    if (v <= 0) { h[j] = 0; dry++; } else h[j] = Math.sqrt(v);
+  }
+  return { h, dry };
 }
 
 // Heads at time p.t under a rate schedule (wells sharing each rate equally). fast uses the W(u)
