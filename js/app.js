@@ -2167,3 +2167,59 @@ updateExcInfo();
 updateWellsInfo();
 updateDerived();
 syncCurveInputs();
+
+// ------------------------------------------------------------------ help icons
+// The panel's explanatory notes sit behind an ⓘ beside the control each explains (marked
+// data-info on the note: the selector of the element the icon goes in). The note stays in the page,
+// hidden, so code that rewrites or hides it still works: the popup shows its current text, and the
+// icon hides with it. Hover opens the popup; a click pins it open until a second click, Esc, or a
+// click elsewhere.
+(function setupInfo() {
+  const pop = document.createElement("div");
+  pop.className = "infopop"; pop.hidden = true; pop.setAttribute("role", "tooltip");
+  document.body.appendChild(pop);
+  let cur = null, pinned = false, hideT = null;
+  const groups = new Map();
+  document.querySelectorAll("p.hint[data-info]").forEach((n) => {
+    const sel = n.dataset.info;
+    if (!groups.has(sel)) groups.set(sel, []);
+    groups.get(sel).push(n);
+    n.classList.add("info-note");
+  });
+  const place = (btn) => {
+    const r = btn.getBoundingClientRect(), w = Math.min(320, window.innerWidth - 24);
+    pop.style.width = `${w}px`;
+    pop.style.left = `${Math.max(12, Math.min(r.left - 12, window.innerWidth - w - 12))}px`;
+    const below = r.bottom + 8, h = pop.offsetHeight;
+    pop.style.top = `${below + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 8) : below}px`;
+  };
+  const show = (btn, notes) => {
+    clearTimeout(hideT);
+    pop.innerHTML = notes.filter((n) => !n.hidden).map((n) => `<p>${n.innerHTML}</p>`).join("");
+    pop.hidden = false; cur = btn; place(btn);
+  };
+  const hide = () => { pop.hidden = true; cur = null; pinned = false; };
+  groups.forEach((notes, sel) => {
+    const host = document.querySelector(sel);
+    if (!host) return;
+    const btn = document.createElement("button");
+    btn.type = "button"; btn.className = "info"; btn.textContent = "i";
+    btn.setAttribute("aria-label", "More about this");
+    host.appendChild(btn);
+    const sync = () => (btn.hidden = notes.every((n) => n.hidden));
+    sync();
+    notes.forEach((n) => new MutationObserver(sync).observe(n, { attributes: true, attributeFilter: ["hidden"] }));
+    btn.addEventListener("mouseenter", () => { if (!pinned) show(btn, notes); });
+    btn.addEventListener("mouseleave", () => { if (!pinned) hideT = setTimeout(hide, 200); });
+    btn.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();          // inside a label or a summary: don't toggle it
+      if (pinned && cur === btn) return hide();
+      show(btn, notes); pinned = true;
+    });
+  });
+  pop.addEventListener("mouseenter", () => clearTimeout(hideT));
+  pop.addEventListener("mouseleave", () => { if (!pinned) hideT = setTimeout(hide, 200); });
+  document.addEventListener("click", (e) => { if (!pop.hidden && !pop.contains(e.target)) hide(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !pop.hidden) hide(); });
+  $("panel").addEventListener("scroll", () => { if (!pop.hidden) hide(); });
+})();

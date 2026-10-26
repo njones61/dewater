@@ -198,3 +198,11 @@ button.small { font-size: 12px; padding: 2px 8px; }
 /* map tiles between whole zoom levels: an invisible outline makes the browser blend their edges,
    so no hairline seams show where they meet */
 .leaflet-tile { outline: 1px solid transparent; }
+/* help icons: the panel's notes behind an ⓘ, opened on hover or click */
+.hint.info-note { display: none !important; }
+button.info { display: inline-grid; place-items: center; width: 17px; height: 17px; min-width: 0; padding: 0; margin-left: 6px; border-radius: 50%; border: 1.5px solid var(--navy); background: #fff; color: var(--navy); font: italic 700 11px/1 Georgia, serif; vertical-align: middle; cursor: pointer; flex: none; }
+button.info:hover, button.info:focus-visible { background: var(--navy); color: #fff; }
+button.info[hidden] { display: none; }
+.infopop { position: fixed; z-index: 2000; background: #fff; color: var(--ink); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.18); padding: 10px 12px; font-size: 13px; line-height: 1.45; }
+.infopop p { margin: 0 0 6px; }
+.infopop p:last-child { margin-bottom: 0; }
