@@ -1169,7 +1169,16 @@ function drawResults() {
     const [cz] = d3.contours().size([nx, ny]).thresholds([0])(below);
     if (cz && cz.coordinates.length) {
       const polys = cz.coordinates.map((poly) => poly.map((r) => r.map(toWorld)));
-      L.polygon(polys, { pane: "results", color: "#1e7a46", weight: 1.5, dashArray: "6,4", fillColor: "#2fa866", fillOpacity: 0.18, interactive: false }).addTo(shade);
+      // bold green hatching under a solid border: plain at any color beneath
+      const pg = L.polygon(polys, { pane: "results", color: "#0f6b37", weight: 2.5, fillColor: "#2fa866", fillOpacity: 1, interactive: false }).addTo(shade);
+      const svg = pg._path && pg._path.ownerSVGElement;
+      if (svg) {
+        if (!svg.querySelector("#dw-hatch")) {
+          const ns = "http://www.w3.org/2000/svg", defs = svg.querySelector("defs") || svg.insertBefore(document.createElementNS(ns, "defs"), svg.firstChild);
+          defs.insertAdjacentHTML("beforeend", '<pattern id="dw-hatch" patternUnits="userSpaceOnUse" width="9" height="9" patternTransform="rotate(45)"><rect width="9" height="9" fill="rgba(47,168,102,0.22)"/><line x1="0" y1="0" x2="0" y2="9" stroke="#0f6b37" stroke-width="3"/></pattern>');
+        }
+        pg._path.setAttribute("fill", "url(#dw-hatch)");
+      }
     }
   }
 
@@ -1190,7 +1199,7 @@ function drawResults() {
     + (last.wall ? key(`<line x1="1" y1="7" x2="23" y2="7" stroke="#fff" stroke-width="7"/><line x1="1" y1="7" x2="23" y2="7" stroke="#3d4550" stroke-width="4"/>`, "Cutoff wall") : "")
     + key(`<line x1="1" y1="7" x2="23" y2="7" stroke="#1d2733" stroke-width="1"/>`, `Contours, labeled in ${Ln()}`)
     + key(`<line x1="0" y1="7" x2="24" y2="7" stroke="#fff" stroke-width="7"/><line x1="0" y1="7" x2="24" y2="7" stroke="#E8582C" stroke-width="4" stroke-dasharray="10,6"/>`, "Water at the required level (excavation bottom plus any extra depth)")
-    + ($("in-dewatered").checked ? `<div class="key"><span class="sw" style="background:rgba(47,168,102,.35);border:1px dashed #1e7a46"></span>Below the required level</div>` : "")
+    + ($("in-dewatered").checked ? key(`<defs><pattern id="dw-hatch-key" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)"><rect width="6" height="6" fill="rgba(47,168,102,0.22)"/><line x1="0" y1="0" x2="0" y2="6" stroke="#0f6b37" stroke-width="2.2"/></pattern></defs><rect x="2" y="1.5" width="20" height="11" fill="url(#dw-hatch-key)" stroke="#0f6b37" stroke-width="2"/>`, "Water below the required level") : "")
     + (last.hw && last.hw.some((v) => v <= 0) ? key(`<circle cx="12" cy="7" r="5" fill="#b3261e" stroke="#fff" stroke-width="2"/><circle cx="12" cy="7" r="6.2" fill="none" stroke="#b3261e" stroke-width="1"/>`, "Well pumped dry") : "")
     + (state.section ? key(`<line x1="1" y1="7" x2="23" y2="7" stroke="#1d2733" stroke-width="2.5" stroke-dasharray="6,4"/>`, "Cross section line A–A′") : "")
     + (last.at && last.hmax > p.target ? `<div class="key"><span class="sw dot" style="border:2.5px solid #b3261e"></span>Highest water in the excavation</div>` : "")
