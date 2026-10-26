@@ -1000,9 +1000,9 @@ function scheduleStatus(p, plan, hmax, td) {
   if (state.fastQ && Math.abs(p.Q - state.fastQ) <= 1e-5 * state.fastQ && tDew > td) {
     return ["bad", `The wells can't dewater by day ${dayN(td)}, even pumping as hard as they can without going dry: the fastest is day ${tDew < Infinity ? dayN(tDew) : `after ${dayN(tEnd())}`}, shown here. ${fix}`];
   }
-  if (tDew <= td * (1 + 1e-4)) {
+  if (tDew <= td * (1 + 1e-4) + 60) {                  // the schedule finds the dewatered day to within a minute
     return ["ok", `${isMin ? `Minimum design pumping rate: start at ${fmtQ(p.Q)}${cut}. ` : ""}Dewatered on day ${dayN(tDew)}${isMin || !capped ? "" : cut}, `
-      + `within the ${dayN(td)} days; then the rate steps down to hold it. See the Pumping schedule.`];
+      + `within ${dayN(td) === 1 ? "the day" : `the ${dayN(td)} days`}; then the rate steps down to hold it. See the Pumping schedule.`];
   }
   if (tDew < Infinity) return ["warn", `Not dewatered by day ${dayN(td)}: at this rate${cut}, the excavation is dry on day ${dayN(tDew)}. Click Find Q\u2098\u1d62\u2099 for the rate that meets the deadline.`];
   return ["warn", `Not dewatered by day ${dayN(tEnd())} at this rate${cut}. Click Find Q\u2098\u1d62\u2099 for the rate that meets the deadline.`];
