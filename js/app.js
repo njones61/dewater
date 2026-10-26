@@ -825,32 +825,45 @@ function drawSchedule() {
   const { sched, tDew, p } = state.last, te = tEnd(), uq = Qf(), unit = Qn(), D = 86400;
   const el = $("sched-chart");
   el.innerHTML = "";
-  const W = Math.min(720, window.innerWidth * 0.9), H = 340, m = { l: 70, r: 20, t: 14, b: 46 };
+  const W = Math.min(720, window.innerWidth * 0.9), H = 360, m = { l: 70, r: 20, t: 0, b: 46 };
   const pts = [];          // the staircase: each rate from its start to the next
   sched.forEach((s, i) => { const t1 = i + 1 < sched.length ? sched[i + 1].t : te; pts.push([s.t / D, s.Q / uq], [t1 / D, s.Q / uq]); });
   const x = d3.scaleLinear().domain([0, te / D]).range([m.l, W - m.r]);
+  // the marked days, each labeled above the plot over its own line, in the line's color; a label
+  // that would run into another goes up a row
+  const td = tDesign(), marks = [];
+  if (tDew < Infinity) marks.push({ t: tDew, text: `Dewatered, day ${dayN(tDew)}`, color: "#b5441f", line: "#E8582C", dash: "6,4" });
+  if (Math.abs(td - tDew) > 0.02 * D) marks.push({ t: td, text: `Deadline, day ${dayN(td)}`, color: "#5b6875", line: "#5b6875", dash: "2,3" });
+  if (state.viewT && Math.abs(state.viewT - tDew) > 0.01 * D && Math.abs(state.viewT - td) > 0.01 * D) marks.push({ t: state.viewT, text: `Day shown, ${dayN(state.viewT)}`, color: "#1d2733", line: "#1d2733", dash: null });
+  const ctx = document.createElement("canvas").getContext("2d");
+  ctx.font = `12px ${getComputedStyle(document.body).fontFamily}`;
+  const rows = [];
+  // each label beside the top of its line: on the left, else on the right, in the lowest row it fits
+  const taken = [];        // per row, the [x0, x1] spans already used
+  marks.sort((a, b) => a.t - b.t).forEach((mk) => {
+    const w = ctx.measureText(mk.text).width, cx = x(mk.t / D);
+    const opts = [cx - 5 - w, cx + 5].filter((x0) => x0 >= 4 && x0 + w <= W - 4);
+    if (!opts.length) opts.push(Math.max(4, Math.min(W - 4 - w, cx - w / 2)));
+    const free = (r, x0) => (taken[r] || []).every(([a, b]) => x0 + w + 8 < a || x0 > b + 8);
+    for (let r = 0; ; r++) {
+      const x0 = opts.find((v) => free(r, v));
+      if (x0 === undefined) continue;
+      (taken[r] = taken[r] || []).push([x0, x0 + w]); mk.x0 = x0; mk.row = r; rows[r] = true;
+      break;
+    }
+  });
+  m.t = 10 + 18 * rows.length + 6;
   const y = d3.scaleLinear().domain([0, d3.max(pts, (q) => q[1]) * 1.08]).nice().range([H - m.b, m.t]);
   const svg = d3.select(el).append("svg").attr("class", "chart").attr("width", W).attr("height", H);
   svg.append("g").attr("stroke", "#e5eaef").selectAll("line").data(y.ticks(6)).join("line").attr("x1", m.l).attr("x2", W - m.r).attr("y1", (d) => y(d)).attr("y2", (d) => y(d));
   svg.append("g").attr("transform", `translate(0,${H - m.b})`).call(d3.axisBottom(x).ticks(10));
   svg.append("g").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(6));
-  const td = tDesign();
-  if (Math.abs(td - tDew) > 0.02 * D) {        // the deadline, where the schedule misses or beats it
-    svg.append("line").attr("x1", x(td / D)).attr("x2", x(td / D)).attr("y1", m.t).attr("y2", H - m.b).attr("stroke", "#5b6875").attr("stroke-dasharray", "2,3");
-    svg.append("text").attr("x", x(td / D) - 6).attr("y", m.t + 48).attr("text-anchor", "end").attr("fill", "#5b6875")
-      .attr("paint-order", "stroke").attr("stroke", "#fff").attr("stroke-width", 4).text(`Deadline, day ${dayN(td)}`);
-  }
-  if (tDew < Infinity) {
-    svg.append("line").attr("x1", x(tDew / D)).attr("x2", x(tDew / D)).attr("y1", m.t).attr("y2", H - m.b).attr("stroke", "#E8582C").attr("stroke-dasharray", "6,4");
-    svg.append("text").attr("x", x(tDew / D) + 6).attr("y", m.t + 12).attr("fill", "#b5441f").text(`Dewatered, day ${dayN(tDew)}`);
-  }
+  // the lines first, then the labels on a white halo, so a line passing a lower label breaks for it
+  marks.forEach((mk) => { mk.ly = 10 + 18 * (rows.length - 1 - mk.row) + 12; const xv = x(mk.t / D);
+    svg.append("line").attr("x1", xv).attr("x2", xv).attr("y1", mk.ly - 12).attr("y2", H - m.b).attr("stroke", mk.line).attr("stroke-width", mk.dash ? 1.5 : 1).attr("stroke-dasharray", mk.dash); });
+  marks.forEach((mk) => svg.append("text").attr("x", mk.x0).attr("y", mk.ly).attr("fill", mk.color)
+    .attr("paint-order", "stroke").attr("stroke", "#fff").attr("stroke-width", 5).text(mk.text));
   svg.append("path").datum(pts).attr("fill", "none").attr("stroke", "#1F4E79").attr("stroke-width", 2.5).attr("d", d3.line().x((q) => x(q[0])).y((q) => y(q[1])));
-  if (state.viewT && Math.abs(state.viewT - tDew) > 0.01 * D) {        // the day the bar shows
-    const xv = x(state.viewT / D), right = xv > (m.l + W - m.r) / 2;
-    svg.append("line").attr("x1", xv).attr("x2", xv).attr("y1", m.t).attr("y2", H - m.b).attr("stroke", "#5b6875").attr("stroke-width", 1);
-    svg.append("text").attr("x", xv + (right ? -6 : 6)).attr("y", m.t + 30).attr("text-anchor", right ? "end" : "start").attr("fill", "#5b6875")
-      .attr("paint-order", "stroke").attr("stroke", "#fff").attr("stroke-width", 4).text(`Day shown, ${dayN(state.viewT)}`);
-  }
   svg.append("text").attr("class", "axis-title").attr("x", (m.l + W - m.r) / 2).attr("y", H - 8).attr("text-anchor", "middle").text("Days since pumping began");
   svg.append("text").attr("class", "axis-title").attr("transform", `translate(16,${(m.t + H - m.b) / 2}) rotate(-90)`).attr("text-anchor", "middle").text(`Total pumping rate (${unit})`);
   const capped = state.last.capped;
