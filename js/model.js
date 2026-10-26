@@ -468,6 +468,7 @@ export function wallLevelAt(Q, p, w, t) {
 // down to h_to within time T (s), and then holds it there. With no time limit (T not > 0) it is
 // the leakage at h_to.
 export function wallQmin(p, w, hTo, T) {
+  if (transient(p) && T > 0) return wallDeadlineRate(p, w, hTo, T);
   const hold = wallLeak(hTo, p, w);
   if (!(T > 0)) return hold;
   let lo = hold, hi = Math.max(hold, 1e-9) * 2;
@@ -476,5 +477,51 @@ export function wallQmin(p, w, hTo, T) {
     const mid = 0.5 * (lo + hi);
     if (wallDrainTime(mid, p, w, hTo) > T) lo = mid; else hi = mid;
   }
+  return hi;
+}
+
+// The pumping schedule with a cutoff wall, in transient flow. The water inside, taken as level,
+// follows S_y A_w dh/dt = −Q + (H² − h²)/(a(t) + b), with the outside resistance a(t) growing as
+// the drawdown spreads (stepped by the midpoint rule, 4000 steps to tEnd).
+//   drawdown: pump Q until the water inside reaches the target (tDew);
+//   hold: then, once a week, the leakage at the target, the lowest rate that holds it there for
+//     the week (the leakage only falls as a(t) grows).
+// Returns {sched, tDew, capped: false, levelAt(t)}: sched as for pumpSchedule.
+export function wallSchedule(p, w, target, Q, tEnd, step = 7 * 86400) {
+  const H2 = p.H * p.H, b = wallCoeffs(p, w).b, SA = w.Sy * w.Aw, N = 4000, dt = tEnd / N;
+  const a = (t) => wallCoeffs({ ...p, t: Math.max(t, 1) }, w).a;
+  const leak = (h, t) => (H2 - h * h) / (a(t) + b);
+  const sched = [{ t: 0, Q }], ts = [0], hs = [p.H];
+  let h = p.H, t = 0, q = Q, tDew = Infinity, next = Infinity;
+  const f = (hh, tt) => (-q + leak(hh, tt)) / SA;
+  while (t < tEnd - 1e-6) {
+    if (t >= next - 1e-6) { q = leak(target, t); if (q !== sched[sched.length - 1].Q) sched.push({ t, Q: q }); next += step; }
+    const d = Math.min(dt, tEnd - t, next - t);
+    const hn = Math.max(0, h + d * f(h + 0.5 * d * f(h, t), t + 0.5 * d));
+    if (tDew === Infinity && hn <= target) {         // dewatered within this step: hold from there
+      const tc = t + d * (h - target) / (h - hn);
+      ts.push(tc); hs.push(target);
+      t = tc; h = target; tDew = tc; next = tc;
+      continue;
+    }
+    t += d; h = hn; ts.push(t); hs.push(h);
+  }
+  const levelAt = (tt) => {
+    if (tt <= 0) return p.H;
+    let lo = 0, hi = ts.length - 1;
+    if (tt >= ts[hi]) return hs[hi];
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (ts[m] <= tt) lo = m; else hi = m; }
+    return hs[lo] + (hs[hi] - hs[lo]) * (tt - ts[lo]) / (ts[hi] - ts[lo]);
+  };
+  return { sched, tDew, capped: false, levelAt };
+}
+
+// The smallest starting rate whose wall schedule dewaters by td (bisection on Q): at least the
+// leakage at the target on day td.
+export function wallDeadlineRate(p, w, target, td) {
+  const H2 = p.H * p.H, b = wallCoeffs(p, w).b, ok = (Q) => wallSchedule(p, w, target, Q, td * 1.001).tDew <= td;
+  let lo = (H2 - target * target) / (wallCoeffs({ ...p, t: td }, w).a + b), hi = 2 * lo;
+  while (!ok(hi)) { lo = hi; hi *= 2; }
+  for (let i = 0; i < 50 && hi - lo > 1e-6 * hi; i++) { const m = 0.5 * (lo + hi); if (ok(m)) hi = m; else lo = m; }
   return hi;
 }

@@ -1,5 +1,5 @@
 // app.js — the map, the panel, and the drawing of results. The calculation is in model.js.
-import { heads, schedHeads, sinkBins, binnedHeads, pumpSchedule, deadlineRate, optimalRate, reach, grid, inside, densify, wallCoeffs, wallLeak, wallOutside, wallSteady, wallDrainTime, wallQmin, wallLevelAt } from "./model.js?v=6";
+import { heads, schedHeads, sinkBins, binnedHeads, pumpSchedule, deadlineRate, optimalRate, reach, grid, inside, densify, wallCoeffs, wallLeak, wallOutside, wallSteady, wallDrainTime, wallQmin, wallLevelAt, wallSchedule } from "./model.js?v=7";
 import { elevations } from "./terrain.js";
 
 /* global L, turf, d3 */
@@ -878,7 +878,8 @@ function drawSchedule() {
   svg.append("text").attr("class", "axis-title").attr("transform", `translate(16,${(m.t + H - m.b) / 2}) rotate(-90)`).attr("text-anchor", "middle").text(`Total pumping rate (${unit})`);
   const capped = state.last.capped;
   $("sched-note").innerHTML = `Start at ${fmtQ(p.Q)}${capped ? ", cut back each week where the wells would otherwise go dry" : ""}. `
-    + (tDew < Infinity ? `The excavation is dewatered on day ${dayN(tDew)}. Then, once a week, the rate steps down to the lowest that holds the water at the required level for the next four weeks. `
+    + (tDew < Infinity ? (state.last.wall ? `The water inside the cutoff wall reaches the required level on day ${dayN(tDew)}. Then, once a week, the rate steps down to the leakage through the wall at the required level, which eases as the drawdown outside spreads. `
+      : `The excavation is dewatered on day ${dayN(tDew)}. Then, once a week, the rate steps down to the lowest that holds the water at the required level for the next four weeks. `)
       : `The excavation is not dewatered by day ${dayN(te)}. `)
     + `Water pumped by day ${dayN(te)}: ${fmtVol(pumpedBy(sched, te))}.`;
 }
@@ -893,7 +894,12 @@ $("btn-sched-csv").onclick = () => {
 // required level once it is drawn down (or, if Q can't get it there, at the level Q holds); the
 // map and the section show that state. Outside, the leakage is drawn in along the wall: sinks
 // spaced along it, superposed as for wells.
-let wallBins = { key: null, b: null };
+let wallBins = { key: null, b: null }, wallMemo = { key: null, r: null };
+function wallPlan(p, w) {
+  const key = JSON.stringify([p.Q, p.k, p.H, p.Sy, p.target, w, tEnd()]);
+  if (wallMemo.key !== key) wallMemo = { key, r: wallSchedule(p, w, p.target, p.Q, tEnd()) };
+  return wallMemo.r;
+}
 function runWall(p, ring, wells) {
   const g = wallGeom(), wp = wallParams();
   if (!g) return setStatus("idle", "Draw or load the cutoff wall, or place it at an offset from the edge.");
@@ -903,10 +909,12 @@ function runWall(p, ring, wells) {
   if (!ring.every((q) => inside(q, g.ring)) || g.ring.some((q) => inside(q, ring))) return setStatus("bad", "The cutoff wall must enclose the excavation.");
   const w = { P: g.P, Aw: g.Aw, t: wp.t, kw: wp.kw, Sy: wp.Sy };
   const leakT = wallLeak(p.target, p, w), tr = p.t !== undefined;
-  const tDrain = wallDrainTime(p.Q, p, w, p.target);
-  // in transient flow, the water inside on day t: still coming down if the drain time is longer
+  // in transient flow, one pumping schedule (model.js wallSchedule): Q until the water inside is
+  // down, then the leakage, re-figured weekly; the water inside on the day shown comes from it
+  const plan = tr ? wallPlan(p, w) : null;
+  const tDrain = tr ? plan.tDew : wallDrainTime(p.Q, p, w, p.target);
   const early = tr && tDrain > p.t;
-  const hHold = early ? wallLevelAt(p.Q, p, w, p.t) : Math.max(wallSteady(p.Q, p, w), p.target);
+  const hHold = tr ? plan.levelAt(p.t) : Math.max(wallSteady(p.Q, p, w), p.target);
   const leak = wallLeak(hHold, p, w), hOut = wallOutside(hHold, p, w);
   const sp = Math.max(g.P / 600, 0.5);
   const sinks = densify(g.ring, sp), S = sinks.map((q) => ({ ...q, q: leak / sinks.length })), pOut = { ...p, rw: sp / 2 };
@@ -928,15 +936,12 @@ function runWall(p, ring, wells) {
   const n = wells.length, qEach = n ? p.Q / n : 0, hw = wells.map(() => hHold);
   state.wells.forEach((wl) => wl.marker.setIcon(wellIcon(false)));
   const hRange = tr ? spanRange(["wall", p.Q, p.k, p.H, p.Sy, p.rw, g.ring, w, box, tDesign()], () => {
-    const pe = { ...p, t: tDesign() }, le = wallLeak(Math.max(wallSteady(p.Q, pe, w), p.target), pe, w);
+    const pe = { ...p, t: tDesign() }, le = wallLeak(plan.levelAt(pe.t), pe, w);
     return heads(grid(box, nx, ny), sinks.map((q) => ({ ...q, q: le / sinks.length })), { ...pOut, t: pe.t }).h;
-  }, (() => {
-    // the water inside the wall on the design day
-    const pe = { ...p, t: tDesign() };
-    return wallDrainTime(p.Q, pe, w, p.target) > pe.t ? wallLevelAt(p.Q, pe, w, pe.t) : Math.max(wallSteady(p.Q, pe, w), p.target);
-  })()) : null;
+  }, plan.levelAt(tDesign())) : null;
   const bar = tr ? barStates(["wall", p.Q, p.k, p.H, p.Sy, tDrain, tEnd()], tDrain, () => false) : null;
-  state.last = { p, box, nx, ny, h, ring, wells, hmax: hHold, at: null, hw, qEach, headAt, hRange, bar, wall: { ...g, w, hHold, leak, hOut } };
+  state.last = { p, box, nx, ny, h, ring, wells, hmax: hHold, at: null, hw, qEach, headAt, hRange, bar,
+    sched: plan && plan.sched, tDew: tDrain, capped: false, wall: { ...g, w, hHold, leak, hOut } };
   drawResults();
   drawSection();
   showAnim();
@@ -949,17 +954,31 @@ function runWall(p, ring, wells) {
   const rows = [
     ["Wall length, P", fmtL(g.P, 0)],
     ["Area inside the wall, A<sub>w</sub>", `${fmt(g.Aw / Lf() ** 2, 0)} ${Ln()}²`],
-    ["Leakage at the required level", fmtQ(leakT)],
+    [tr ? `Leakage at the required level, day ${dayN(p.t)}` : "Leakage at the required level", fmtQ(leakT)],
     ["Water stored above the required level, S<sub>y</sub>A<sub>w</sub>(H − h<sub>t</sub>)", `${fmt(V / Lf() ** 3, 0)} ${Ln()}³`],
-    ["Total rate, Q", fmtQ(p.Q)],
-    ["Time to draw down at Q", Number.isFinite(tDrain) ? days(tDrain) : "never: Q is less than the leakage"],
+    [tr ? "Starting rate, Q" : "Total rate, Q", fmtQ(p.Q)],
+    tr ? ["Dewatered on day", Number.isFinite(tDrain) ? dayN(tDrain) : `not by day ${dayN(tEnd())}: Q is too little`]
+      : ["Time to draw down at Q", Number.isFinite(tDrain) ? days(tDrain) : "never: Q is less than the leakage"],
   ];
-  if (n) rows.push(["Wells", `${n}${outside ? ` (${outside} outside the wall)` : ""}`], ["Rate per well", fmtQ(qEach)]);
+  if (tr) {
+    rows.push([`Rate on day ${dayN(p.t)}`, fmtQ(rateAt(plan.sched, p.t))]);
+    if (plan.sched.length > 1) rows.push([`Rate to hold it, day ${dayN(tEnd())}`, fmtQ(plan.sched[plan.sched.length - 1].Q)]);
+    rows.push([`Water pumped by day ${dayN(tEnd())}`, fmtVol(pumpedBy(plan.sched, tEnd()))]);
+  }
+  if (n) rows.push(["Wells", `${n}${outside ? ` (${outside} outside the wall)` : ""}`], [tr ? "Starting rate per well" : "Rate per well", fmtQ(qEach)]);
   rows.push([tr ? `Water inside the wall on day ${dayN(p.t)}` : "Water inside the wall", lvl(hHold)], ["Water at the wall's outside face", lvl(hOut)]);
   if (p.t !== undefined) rows.push(["Spread of the drawdown outside, 1.5√(kHt/S<sub>y</sub>)", fmtL(p.R, 0)]);
   else if (p.Rmethod !== "entered") rows.push(["Equivalent radius, √(A/π)", fmtL(rEquiv(), 1)], ["R from the formula", fmtL(p.R, 0)]);
   $("results").innerHTML = rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("");
   const where = outside ? ` ${outside} well${outside > 1 ? "s are" : " is"} outside the wall: move ${outside > 1 ? "them" : "it"} inside.` : "";
+  $("btn-sched").hidden = !tr;
+  if (tr) {
+    const isMin = state.optQ && Math.abs(p.Q - state.optQ) <= 1e-5 * state.optQ, td = tDesign();
+    if (!Number.isFinite(tDrain)) return setStatus("warn", `Not dewatered by day ${dayN(tEnd())} at this rate: the water inside the wall is ${fmtL(hHold - p.target, 2)} above the required level on day ${dayN(p.t)}. Click Find Q\u2098\u1d62\u2099 for the rate that meets the deadline.${where}`);
+    if (early) return setStatus("warn", `Day ${dayN(p.t)}: drawing down at ${fmtQ(p.Q)}; the water inside the wall is ${fmtL(hHold - p.target, 2)} above the required level. Dewatered on day ${dayN(tDrain)}${tDrain > td * (1 + 1e-4) ? `, after the ${dayN(td)} days allowed` : ""}.${where}`);
+    const qNow = rateAt(plan.sched, p.t);
+    return setStatus(outside ? "warn" : "ok", `${isMin ? `Minimum design pumping rate: start at ${fmtQ(p.Q)}. ` : ""}Dewatered on day ${dayN(tDrain)}${tDrain <= td * (1 + 1e-4) ? `, within the ${dayN(td)} days` : `, after the ${dayN(td)} days allowed`}; then the rate steps down to the leakage through the wall${Math.abs(p.t - td) > 1e-6 * td || !isMin ? `, ${fmtQ(qNow)} on day ${dayN(p.t)}` : ""}. See the Pumping schedule.${where}`);
+  }
   if (early && Number.isFinite(tDrain)) {
     setStatus("warn", `Not dewatered by day ${dayN(p.t)}: the water inside the wall is ${fmtL(hHold - p.target, 2)} above the required level. At this rate it gets there in ${days(tDrain)}.${where}`);
   } else if (hHold > p.target + 1e-9 || !Number.isFinite(tDrain)) {
