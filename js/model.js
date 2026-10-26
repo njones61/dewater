@@ -117,7 +117,7 @@ export function optimalRate(checkPoints, wells, p, target) {
   for (const a of A) Amin = Math.min(Amin, a);
   if (!(Amin > 0)) return { Q: Infinity, qEach: Infinity, hWellMin: 0, feasible: false };
   const qEach = (p.H * p.H - target * target) / Amin;
-  const Aw = influence(wells.map((w) => ({ x: w.x, y: w.y })), wells, p);
+  const Aw = influence(wells.map((w) => ({ x: w.x + p.rw, y: w.y })), wells, p);   // at the screen, as pumpSchedule checks
   let hWellMin = Infinity;
   for (const a of Aw) {
     const v = p.H * p.H - qEach * a;
@@ -322,7 +322,9 @@ export function pumpSchedule(checkPoints, wells, p, target, Q, tEnd, step = 7 * 
 export function deadlineRate(checkPoints, wells, p, target, td, tEnd, inf = null) {
   const o = inf ? optimalWith(checkPoints, wells, p, target, (pts) => inf(pts, td)) : optimalRate(checkPoints, wells, { ...p, t: td }, target);
   if (!o || !isFinite(o.Q)) return null;
-  if (o.feasible) return { Q: o.Q, met: true, tDew: td, capped: false, sched: null };
+  // the constant rate holds if no well comes within the schedule's floor (pumpSchedule: 0.1% of H
+  // above the bottom) by td; just inside it, the schedule would cut the rate back and miss td
+  if (o.feasible && o.hWellMin > 1e-3 * p.H) return { Q: o.Q, met: true, tDew: td, capped: false, sched: null };
   const A = inf ? inf(checkPoints, td) : influence(checkPoints, wells, { ...p, t: td });
   const few = Array.from(A.keys()).sort((i, j) => A[i] - A[j]).slice(0, 150).map((i) => checkPoints[i]);
   const run = (Q, pts = few) => pumpSchedule(pts, wells, p, target, Q, tEnd, undefined, undefined, undefined, inf);

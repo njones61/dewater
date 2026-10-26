@@ -1,5 +1,5 @@
 // app.js — the map, the panel, and the drawing of results. The calculation is in model.js.
-import { heads, schedHeads, pumpSchedule, deadlineRate, optimalRate, optimalWith, gridModel, reach, grid, inside, densify } from "./model.js?v=9";
+import { heads, schedHeads, pumpSchedule, deadlineRate, optimalRate, optimalWith, gridModel, reach, grid, inside, densify } from "./model.js?v=10";
 import { elevations } from "./terrain.js";
 
 /* global L, turf, d3 */
