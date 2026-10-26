@@ -83,7 +83,7 @@
         </div>
         <p class="readout" id="derived"></p>
         <div class="fields two">
-          <label class="span2">Hydraulic conductivity, k
+          <label class="span2"><span>Horizontal conductivity, k<sub>h</sub></span>
             <span class="pair"><input id="in-k" type="number" step="any" value="5e-4">
               <select id="in-k-unit"><option value="cms" selected>cm/s</option><option value="ms">m/s</option><option value="mday">m/day</option><option value="fts">ft/s</option><option value="ftday">ft/day</option><option value="gpdft2">gal/day/ft²</option></select></span></label>
           <div class="seg span2" role="radiogroup" aria-label="Steady or transient flow">
@@ -99,6 +99,10 @@
           <label id="R-field"><span>R (<span class="uL">m</span>)</span><input id="in-R" type="number" step="any" value="500"></label>
           <label id="tdays-field" hidden>Days to dewater, t<input id="in-tdays" type="number" step="any" min="0" value="30"></label>
           <label id="sy-field" hidden><span>Specific yield, S<sub>y</sub></span><input id="in-sy" type="number" step="any" value="0.2"></label>
+          <label id="aniso-field" hidden><span>Anisotropy, k<sub>h</sub>/k<sub>v</sub></span><input id="in-aniso" type="number" step="any" min="1" value="1"></label>
+          <p class="hint span2" id="aniso-note" hidden>1 for uniform soil; 2 to 10 for layered deposits. The
+            design itself uses k<sub>h</sub>; this checks whether the water table can drain fast enough
+            for the deadline (see How it works).</p>
           <label><span>Well radius, r<sub>w</sub> (<span class="uL">m</span>)</span><input id="in-rw" type="number" step="any" value="0.15"></label>
           <p class="hint span2" id="R-note" hidden>Empirical, in meters with k in m/s (Bear 1979, p. 306). The
             wells are treated as one large well of the excavation's equivalent radius, r<sub>e</sub> = √(A/π),
@@ -346,6 +350,17 @@
         constant (no delayed yield at early times), and the drawdown should stay modest compared
         with H. A recharge boundary such as a river, or the edge of the aquifer, ends the growth;
         a steady R stands for that case.</p>
+      <h3>Layered soil: the water table drains late</h3>
+      <p>The design takes the water table to give up its specific yield as soon as the heads fall. In
+        fact the soil drains only as fast as water can move down through it to the wells' screens, and
+        in layered soil water moves far more easily sideways than down (k<sub>h</sub> several times
+        k<sub>v</sub>). The water table then lags the heads at depth, and catches up in about
+        4 S<sub>y</sub> H / k<sub>v</sub> (Neuman's delayed yield), given in the results. When the
+        deadline is short against that time, the design is optimistic: a model of a ring of wells in
+        radius and depth needed about 10% more pumping when the deadline was a third of that time, and
+        25 to 60% more when it was a tenth or less. The app warns when the deadline is under half of
+        that time; it does not correct the design. For a site where it matters, check the design with a
+        layered numerical model.</p>
       <h3>A cutoff wall</h3>
       <p>A slurry cutoff wall around the site, keyed into the low-k layer, cuts off the inflow:
         water reaches the inside only through the wall. Placed around the site, the wall is a rectangle
@@ -426,6 +441,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-  <script type="module" src="js/app.js?v=79"></script>
+  <script type="module" src="js/app.js?v=81"></script>
 </body>
 </html>

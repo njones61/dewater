@@ -144,7 +144,7 @@ function params() {
     Q: num("in-Q") * Qf(),
     site: null,
   };
-  if (flow() === "transient") { p.t = num("in-tdays") * 86400; p.Sy = num("in-sy"); }
+  if (flow() === "transient") { p.t = num("in-tdays") * 86400; p.Sy = num("in-sy"); p.aniso = num("in-aniso") || 1; }
   if (mode() === "depth") {
     const site = { dwt: numL("in-dwt"), dbase: numL("in-dbase"), dexc: numL("in-dexc"), margin: numL("in-margin") || 0, gelev: numL("in-gelev") };
     p.site = site;
@@ -204,7 +204,7 @@ function showFlow() {
   syncCurveInputs();
   $("R-method-field").hidden = tr; $("R-field").hidden = tr;
   $("R-note").hidden = tr || $("in-R-method").value === "entered";
-  ["tdays-field", "t-note"].forEach((id) => ($(id).hidden = !tr));
+  ["tdays-field", "t-note", "aniso-field", "aniso-note"].forEach((id) => ($(id).hidden = !tr));
   $("sy-field").hidden = !(tr || $("in-wall").checked);
   showAnim();
 }
@@ -325,6 +325,7 @@ document.querySelectorAll('input[name="mode"]').forEach((r) => r.addEventListene
 }));
 function checkParams(p) {
   if (!(p.k > 0)) return "Enter a hydraulic conductivity greater than zero.";
+  if (p.aniso !== undefined && !(p.aniso >= 1)) return "Enter an anisotropy, kh/kv, of 1 or more.";
   const st = p.site;
   if (st && st.elev) {
     if (!Number.isFinite(st.gelev)) return "Enter the ground elevation, or use terrain.";
@@ -926,12 +927,16 @@ function run() {
     rows.push(["R from the formula", fmtL(p.R, 0)]);
   }
   if (tr) rows.push(["Spread of the drawdown, 1.5√(kHt/S<sub>y</sub>)", fmtL(p.R, 0)]);
+  if (tr) rows.push(["Water-table drainage time, 4 S<sub>y</sub>H/k<sub>v</sub>", `${dayN(drainTime(p))} days`]);
   if (gm) rows.push([tr ? `Leakage through the wall, day ${dayN(p.t)}` : "Leakage through the wall", fmtQ(leakNow)]);
   rows.push(st && st.elev ? ["Lowest water, at a well, elevation", E(Math.min(...hw))] : st ? ["Deepest water, at a well", `${fmtL(st.dbase - Math.min(...hw), 2)} below ground`] : ["Lowest head at a well", fmtL(Math.min(...hw), 2)]);
   $("results").innerHTML = rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("");
   $("btn-sched").hidden = !sched;
 
-  if (sched) return setStatus(...scheduleStatus(p, plan, hmax, td));
+  if (sched) {
+    const [kind, text] = scheduleStatus(p, plan, hmax, td), lw = layerWarning(p, td);
+    return setStatus(lw && kind === "ok" ? "warn" : kind, text + lw);
+  }
   if (dryWells.length) {
     setStatus("bad", `${dryWells.length} well${dryWells.length > 1 ? "s" : ""} pumped dry (shown red): the rate is more than the aquifer can deliver there. ${wallG ? "Add wells or lower Q." : "Add wells, lower Q, or enclose the site with a cutoff wall (step 4)."}`);
   } else if (!ring) {
@@ -945,6 +950,21 @@ function run() {
   } else {
     setStatus("warn", `Not dewatered: the water is ${fmtL(hmax - p.target, 2)} above the required level at the marked point.`);
   }
+}
+
+// Delayed drainage. The design takes the water table to give up its specific yield as soon as the
+// heads fall; in fact it drains only as fast as water moves down through the soil, which in
+// layered soil (kv well below kh) is slow. The water table catches up in about 4 Sy H / kv
+// (Neuman's delayed yield). A model of the ring in radius and depth, against the depth-averaged
+// one used here, put the extra pumping the deadline takes at about 10% when the deadline is a third
+// of that time and 25 to 60% when it is a tenth or less; a few percent past half of it, where no
+// warning is given. It is a warning, not a correction.
+const drainTime = (p) => 4 * p.Sy * p.H / (p.k / (p.aniso || 1));
+function layerWarning(p, td) {
+  const x = td / drainTime(p);
+  if (!(x < 0.5)) return "";                 // a few percent at most: no warning
+  const more = x < 0.1 ? "roughly 25 to 60%" : x < 0.2 ? "roughly 25 to 35%" : "about 10%";
+  return ` The water table drains slowly here (about ${dayN(drainTime(p))} days to catch up, against ${dayN(td)} allowed), so meeting the deadline may take ${more} more pumping than shown.`;
 }
 
 // The status line for a transient design: on the design day, whether the schedule meets the
@@ -1247,7 +1267,7 @@ buildRampPicker();
 
 ["in-field", "in-interval", "in-fill", "in-dewatered", "in-ramp", "in-ramp-rev"].forEach((id) => $(id).addEventListener("change", () => { drawResults(); persist(); }));
 $("in-opacity").addEventListener("input", () => fill.setOpacity(parseFloat($("in-opacity").value)));
-["in-k", "in-k-unit", "in-ewt", "in-ebase", "in-eexc", "in-ereq", "in-R", "in-rw", "in-Q", "in-Q-unit", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-woff", "in-wthick", "in-kw", "in-kw-unit", "in-sy", "in-tdays"]
+["in-k", "in-k-unit", "in-ewt", "in-ebase", "in-eexc", "in-ereq", "in-R", "in-rw", "in-Q", "in-Q-unit", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-woff", "in-wthick", "in-kw", "in-kw-unit", "in-sy", "in-aniso", "in-tdays"]
   .forEach((id) => $(id).addEventListener("input", () => { updateDerived(); schedule(250); }));
 
 // ------------------------------------------------------------------ terrain
@@ -1966,7 +1986,7 @@ $("btn-export-contours").onclick = () => {
   download("contours.geojson", JSON.stringify(fc), "application/geo+json");
 };
 
-const INPUTS = ["in-R-method", "in-curve-var", "in-kmin", "in-kmax", "in-k", "in-k-unit", "in-ewt", "in-ebase", "in-eexc", "in-ereq", "in-R", "in-rw", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-Q", "in-Q-unit", "in-offset", "in-nwells", "in-field", "in-interval", "in-nmin", "in-nmax", "in-ramp", "in-woff", "in-wthick", "in-kw", "in-kw-unit", "in-sy", "in-tdays", "in-tmin", "in-tmax"];
+const INPUTS = ["in-R-method", "in-curve-var", "in-kmin", "in-kmax", "in-k", "in-k-unit", "in-ewt", "in-ebase", "in-eexc", "in-ereq", "in-R", "in-rw", "in-dwt", "in-dbase", "in-dexc", "in-margin", "in-gelev", "in-Q", "in-Q-unit", "in-offset", "in-nwells", "in-field", "in-interval", "in-nmin", "in-nmax", "in-ramp", "in-woff", "in-wthick", "in-kw", "in-kw-unit", "in-sy", "in-aniso", "in-tdays", "in-tmin", "in-tmax"];
 function project() {
   const f = excFeature();
   return {

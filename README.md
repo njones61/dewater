@@ -64,6 +64,12 @@ level for the next four weeks. *Find Q_min* gives the smallest starting rate tha
 deadline, or, when the wells can't, the fastest they can do; *Pumping schedule* plots the rates
 and gives the water pumped. Transient is the default: the deadline sets the rate.
 
+The design takes the water table to drain as soon as the heads fall. In layered soil (kh several
+times kv) it drains late, catching up in about 4 Sy H / kv (Neuman's delayed yield). Given the
+anisotropy kh/kv, the app reports that time and warns when the deadline is under half of it: a
+radius-and-depth model of a ring of wells needed about 10% more pumping at a third of that time and
+25 to 60% more at a tenth or less. It warns; it does not correct.
+
 This is a screening tool for teaching and preliminary design.
 
 ## Development
