@@ -61,42 +61,55 @@ test("grid, inside, densify", () => {
   assert.equal(densify(sq, 0.25).length, 16);
 });
 
-import { wallCoeffs, wallLeak, wallOutside, wallSteady, wallDrainTime, wallQmin, wallLevelAt } from "../js/model.js";
+import { gridModel } from "../js/model.js";
 
-// the deck's example: a wall 20 m outside a 157 × 83 m excavation
-const pw = { H: 50, k: 5e-6, R: 165, rw: 0.15 };
-const wall = { P: 640, Aw: 197 * 123, t: 0.9, kw: 1e-9, Sy: 0.2 };
-
-test("wall leakage: the two resistances in series", () => {
-  const { a, b } = wallCoeffs(pw, wall);
-  const Q = wallLeak(35, pw, wall), ho = wallOutside(35, pw, wall);
-  close(pw.H ** 2 - ho ** 2, Q * a);                         // outside: one large well
-  close(ho ** 2 - 35 ** 2, Q * b);                            // the wall: the trench equation
-  close(Q, 640 * 1e-9 * (ho ** 2 - 35 ** 2) / (2 * 0.9));
-  assert.ok(Q > 4.4e-4 && Q < 4.6e-4);                        // about 0.45 L/s, as on the slide
-  close(wallSteady(Q, pw, wall), 35);
-});
-
-test("drain-down time matches a numerical integration", () => {
-  const Q = 0.02, n = 200000;
-  const leak = (h) => wallLeak(h, pw, wall);
-  let t = 0;
+// the class site: 16 wells 15 m out from a 157 × 83 m excavation, a wall 20 m out
+const ringW = (n, off) => {
+  const A = 78.5 + off, B = 41.5 + off, P = 4 * (A + B), out = [];
   for (let i = 0; i < n; i++) {
-    const h = 35 + (pw.H - 35) * (i + 0.5) / n;
-    t += wall.Sy * wall.Aw * ((pw.H - 35) / n) / (Q - leak(h));
+    let s = P * i / n;
+    if (s < 2 * A) { out.push({ x: -A + s, y: -B }); continue; } s -= 2 * A;
+    if (s < 2 * B) { out.push({ x: A, y: -B + s }); continue; } s -= 2 * B;
+    if (s < 2 * A) { out.push({ x: A - s, y: B }); continue; } s -= 2 * A;
+    out.push({ x: -A, y: B - s });
   }
-  close(wallDrainTime(Q, pw, wall, 35), t, 1e-6);
-  assert.equal(wallDrainTime(wallLeak(35, pw, wall) * 0.99, pw, wall, 35), Infinity);
-  // pumping more than the wall passes even at h = 0 (D < 0) and exactly that much (D = 0)
-  const big = pw.H ** 2 / (wallCoeffs(pw, wall).a + wallCoeffs(pw, wall).b);
-  assert.ok(Number.isFinite(wallDrainTime(big * 1.5, pw, wall, 35)));
-  close(wallDrainTime(big, pw, wall, 35), wallDrainTime(big * (1 + 1e-9), pw, wall, 35), 1e-6);
+  return out;
+};
+const pg = { H: 50, k: 5e-6, rw: 0.15, Sy: 0.2 }, gw = ringW(16, 15);
+const box20 = densify([{ x: -98.5, y: -61.5 }, { x: 98.5, y: -61.5 }, { x: 98.5, y: 61.5 }, { x: -98.5, y: 61.5 }], 1000);
+const gpts = [{ x: 0, y: 0 }, { x: 78.5, y: 0 }, { x: -78.5, y: 41.5 }, { x: 30, y: -20 }];
+const screens = gw.map((w) => ({ x: w.x + pg.rw, y: w.y }));
+
+test("the grid model reproduces Theis with no wall, and with a wall as permeable as the soil", () => {
+  for (const g of [gridModel(gw, pg, { wall: null, tMax: 40 * 86400 }), gridModel(gw, pg, { wall: box20, kw: pg.k, t: 0.9, tMax: 40 * 86400 })]) {
+    for (const d of [7, 30]) {
+      const t = d * 86400, A = influence(gpts, gw, { ...pg, t }), G = g.at(gpts, t);
+      gpts.forEach((_, i) => close(G[i], A[i], d < 30 ? 0.05 : 0.015));      // early, the center has barely moved
+      const As = influence(screens, gw, { ...pg, t }), Gs = g.at(screens, t);
+      screens.forEach((_, i) => close(Gs[i], As[i], 0.02));
+    }
+  }
 });
 
-test("Q_min with a wall drains in the time allowed, and is the leakage with no time limit", () => {
-  const T = 30 * 86400, Q = wallQmin(pw, wall, 35, T);
-  close(wallDrainTime(Q, pw, wall, 35), T, 1e-6);
-  close(wallQmin(pw, wall, 35, 0), wallLeak(35, pw, wall));
+test("a tight wall: the water pumped comes from storage inside plus the leakage", () => {
+  const g = gridModel(gw, pg, { wall: box20, kw: 1e-9, t: 0.9, tMax: 40 * 86400 }), t = 30 * 86400;
+  // storage: S_y/(2H) ∫ u dA (u = H² − h², linearized as in the model), inside the wall and out
+  const big = grid([-1200, 1200, -1200, 1200], 481, 481), u = g.at(big, t);
+  let V = 0;
+  for (const v of u) V += v;
+  V *= pg.Sy / (2 * pg.H) * (2400 / 480) ** 2;
+  close(V, 16 * t, 0.01);
+  let L = 0, prev = 0, tp = 0;
+  for (let s = 1; s <= 400; s++) { const ts = t * s / 400, l = g.leak(ts); L += 0.5 * (l + prev) * (ts - tp); prev = l; tp = ts; }
+  assert.ok(L > 0 && L < 0.03 * 16 * t);           // the wall passes little
+});
+
+test("steady flow through a tight wall: all the water comes through it, by the trench equation", () => {
+  const R = 300, g = gridModel(gw, { ...pg, R, Sy: 0 }, { wall: box20, kw: 1e-9, t: 0.9 });
+  close(g.leak(0), 16, 0.01);                          // every well pumping 1 m³/s
+  // the wall carries nearly all the head: inside (away from the wells) H² − h² ≈ Q·2t/(P k_w)
+  const P = 2 * (197 + 123), b = 2 * 0.9 / (P * 1e-9), u = g.at([{ x: 0, y: 0 }], 0)[0];
+  assert.ok(u > 16 * b && u < 1.1 * 16 * b, `${u} vs ${16 * b}`);
 });
 
 test("W(u) matches the tabulated Theis well function", () => {
@@ -123,12 +136,6 @@ test("transient Q_min dewaters at the time given, and the time to dewater at Q_m
   close(timeToDewater(pts, wells, pt, 35, opt.Q), pt.t, 2e-4);
   assert.ok(optimalRate(pts, wells, { ...pt, t: 5 * 86400 }, 35).Q > opt.Q);   // less time, more pumping
   assert.equal(timeToDewater(pts, wells, pt, 35, opt.Q * 1e-3), Infinity);
-});
-
-test("the level inside the wall at time t inverts the drain time", () => {
-  const Q = 0.02, t = 10 * 86400, h = wallLevelAt(Q, pw, wall, t);
-  assert.ok(h < pw.H && h > wallSteady(Q, pw, wall));
-  close(wallDrainTime(Q, pw, wall, h), t, 1e-6);
 });
 
 test("holding the water down: steps that keep the excavation dry, and schedule heads that add rate changes in time", () => {

@@ -167,42 +167,24 @@ function wellWFast(u) {
   return WT[i] + g * (WT[i + 1] - WT[i]);
 }
 
-// Many equal sinks (the leakage along a cutoff wall) seen from many points, through time: the
-// distances don't change, only W(u)'s time factor does. So each point's sinks are counted once
-// into log-spaced bins of r² (with the mean ln r² of each bin), and the heads at any time sum the
-// bins instead of the sinks: W varies smoothly across a bin, a ratio of 1.1 or so in r.
-export function sinkBins(points, sinks, rw, nb = 48) {
-  let r2max = rw * rw;
-  const n = points.length, cnt = new Float32Array(n * nb), mlr = new Float32Array(n * nb);
-  for (const q of points) for (const s of sinks) r2max = Math.max(r2max, (q.x - s.x) ** 2 + (q.y - s.y) ** 2);
-  const lo = Math.log(rw * rw), span = Math.log(r2max) - lo + 1e-9;
-  for (let j = 0; j < n; j++) {
-    const { x, y } = points[j], o = j * nb;
-    for (const s of sinks) {
-      const lr = Math.log(Math.max((x - s.x) ** 2 + (y - s.y) ** 2, rw * rw)), b = Math.min(nb - 1, Math.floor((lr - lo) / span * nb));
-      cnt[o + b]++; mlr[o + b] += lr;
-    }
-    for (let b = 0; b < nb; b++) if (cnt[o + b]) mlr[o + b] /= cnt[o + b];
-  }
-  return { n, nb, cnt, mlr };
-}
-// Heads at time p.t (transient) from sinkBins, each sink taking q. As heads, with the W(u) table.
-export function binnedHeads(bins, q, p) {
-  const { n, nb, cnt, mlr } = bins, h = new Float64Array(n), H2 = p.H * p.H, c = p.Sy / (4 * p.k * p.H * p.t), f = q / (Math.PI * p.k);
-  let dry = 0;
-  for (let j = 0; j < n; j++) {
-    let s = 0;
-    for (let b = j * nb, e = b + nb; b < e; b++) if (cnt[b]) s += cnt[b] * 0.5 * wellWFast(Math.exp(mlr[b]) * c);
-    const v = H2 - s * f;
-    if (v <= 0) { h[j] = 0; dry++; } else h[j] = Math.sqrt(v);
-  }
-  return { h, dry };
-}
-
 // Heads at time p.t under a rate schedule (wells sharing each rate equally). fast uses the W(u)
 // table. Returns {h, dry} as heads does.
-export function schedHeads(points, wells, p, sched, fast = false) {
+export function schedHeads(points, wells, p, sched, fast = false, inf = null) {
   const n = wells.length, H2 = p.H * p.H, c = 1 / (Math.PI * p.k), rw2 = p.rw * p.rw, Wf = fast ? wellWFast : wellW;
+  if (inf) {                     // another influence (the grid model): superposed the same way
+    const v = new Float64Array(points.length);
+    sched.forEach((s, i) => {
+      if (s.t >= p.t) return;
+      const dq = (s.Q - (i ? sched[i - 1].Q : 0)) / n;
+      if (!dq) return;
+      const A = inf(points, p.t - s.t);
+      for (let j = 0; j < v.length; j++) v[j] += dq * A[j];
+    });
+    const h = new Float64Array(points.length);
+    let dry = 0;
+    for (let j = 0; j < h.length; j++) { const w = H2 - v[j]; if (w <= 0) { h[j] = 0; dry++; } else h[j] = Math.sqrt(w); }
+    return { h, dry };
+  }
   const steps = [];
   sched.forEach((s, i) => {
     if (s.t >= p.t) return;
@@ -238,14 +220,14 @@ export function schedHeads(points, wells, p, sched, fast = false) {
 // Returns {sched, tDew, capped}: sched as for schedHeads (consecutive equal rates merged), tDew
 // the time the excavation is dewatered (Infinity if not by tEnd), and whether the wells limited the
 // drawdown rate.
-export function pumpSchedule(checkPoints, wells, p, target, Q, tEnd, step = 7 * 86400, m = 4, ahead = 4) {
+export function pumpSchedule(checkPoints, wells, p, target, Q, tEnd, step = 7 * 86400, m = 4, ahead = 4, inf = null) {
   const n = wells.length, H2 = p.H * p.H, D = H2 - target * target, floor2 = (1e-3 * p.H) ** 2;
   const wpts = wells.map((w) => ({ x: w.x + p.rw, y: w.y }));
   if (!n || !checkPoints.length) return { sched: [{ t: 0, Q }], tDew: Infinity, capped: false };
   const sched = [], memo = { c: new Map(), w: new Map() };
   const A = (key, pts, tau) => {
     const k = Math.round(tau), mm = memo[key];
-    if (!mm.has(k)) mm.set(k, influence(pts, wells, { ...p, t: tau }));
+    if (!mm.has(k)) mm.set(k, inf ? inf(pts, tau) : influence(pts, wells, { ...p, t: tau }));
     return mm.get(k);
   };
   // Σ ΔQᵢ/n · A(τ − tᵢ): H² − h² at each point at time τ, under the schedule so far
@@ -337,13 +319,13 @@ export function pumpSchedule(checkPoints, wells, p, target, Q, tEnd, step = 7 * 
 // The search checks the points of the excavation where the water is highest (smallest influence
 // at td), then confirms with every check point. Returns {Q, met, tDew, capped, sched}: sched is
 // the schedule found, or null for the constant rate (Q until td).
-export function deadlineRate(checkPoints, wells, p, target, td, tEnd) {
-  const o = optimalRate(checkPoints, wells, { ...p, t: td }, target);
+export function deadlineRate(checkPoints, wells, p, target, td, tEnd, inf = null) {
+  const o = inf ? optimalWith(checkPoints, wells, p, target, (pts) => inf(pts, td)) : optimalRate(checkPoints, wells, { ...p, t: td }, target);
   if (!o || !isFinite(o.Q)) return null;
   if (o.feasible) return { Q: o.Q, met: true, tDew: td, capped: false, sched: null };
-  const A = influence(checkPoints, wells, { ...p, t: td });
+  const A = inf ? inf(checkPoints, td) : influence(checkPoints, wells, { ...p, t: td });
   const few = Array.from(A.keys()).sort((i, j) => A[i] - A[j]).slice(0, 150).map((i) => checkPoints[i]);
-  const run = (Q, pts = few) => pumpSchedule(pts, wells, p, target, Q, tEnd);
+  const run = (Q, pts = few) => pumpSchedule(pts, wells, p, target, Q, tEnd, undefined, undefined, undefined, inf);
   const fast = run(Infinity);
   if (!(fast.tDew <= td)) { const f = run(Infinity, checkPoints); if (!(f.tDew <= td)) return { Q: f.sched[0].Q, met: false, tDew: f.tDew, capped: true, sched: f.sched }; }
   let lo = o.Q, hi = fast.sched[0].Q;
@@ -357,6 +339,20 @@ export function deadlineRate(checkPoints, wells, p, target, td, tEnd) {
     hi *= 1.002;
   }
   return { Q: hi, met: true, tDew: td, capped: true, sched: null };
+}
+
+// optimalRate with another influence, A(points) per unit rate per well (the grid model): the
+// heads at the well screens come from the same A, at r_w from each well.
+export function optimalWith(checkPoints, wells, p, target, A) {
+  if (!wells.length || !checkPoints.length) return null;
+  if (target >= p.H) return { Q: 0, qEach: 0, hWellMin: p.H, feasible: true };
+  let Amin = Infinity;
+  for (const a of A(checkPoints)) Amin = Math.min(Amin, a);
+  if (!(Amin > 0)) return { Q: Infinity, qEach: Infinity, hWellMin: 0, feasible: false };
+  const qEach = (p.H * p.H - target * target) / Amin;
+  let hWellMin = Infinity;
+  for (const a of A(wells.map((w) => ({ x: w.x + p.rw, y: w.y })))) { const v = p.H * p.H - qEach * a; hWellMin = Math.min(hWellMin, v > 0 ? Math.sqrt(v) : 0); }
+  return { Q: qEach * wells.length, qEach, hWellMin, feasible: hWellMin > 0 };
 }
 
 // A regular grid of points over a box, nx by ny, row by row from the top (y1) down, so it can be
@@ -392,136 +388,212 @@ export function densify(ring, step) {
   return out;
 }
 
-// ------------------------------------------------------------------ cutoff wall
-// A slurry cutoff wall around the site, keyed into the low-k layer, which is taken as
-// impermeable: water reaches the inside only through the wall. Two resistances in series, both
-// linear in h² (Dupuit):
+// ------------------------------------------------------------------ cutoff wall: a grid model
+// With a cutoff wall the aquifer is no longer uniform, so the wells' influence comes from a
+// finite-difference model instead of the Theis solution. In u = H² − h² (Dupuit), with storage
+// taken at the saturated thickness H as the Theis form here does,
+//     (S_y/H) ∂u/∂t = ∇·(k ∇u) + 2q δ(wells),
+// which is linear in the rates: the response to every well pumping 1 m³/s is computed once, and
+// any pumping schedule is a superposition of it, exactly as with Theis. The grid is uniform over
+// the wall and the wells and grows geometrically outward to a fixed head far beyond the
+// drawdown's reach (steady flow: fixed at R). The wall, keyed into the low-k base, is a barrier on
+// the cell faces between the inside and the outside: its thickness t at k_w in series with the
+// rest of the face's soil, scaled so the stair-stepped faces add up to the wall's true length.
+// Near a well, the field adds the well's own logarithmic cone below the cell's size (Peaceman),
+// so the head at the well screen, and wells going dry, come out as in the analytic model.
 //
-//   outside, the enclosure as one large well of radius r_W = √(A_w/π):
-//       H² − h_o² = Q · ln(R/r_W)/(πk)          (a = ln(R/r_W)/(πk))
-//   across the wall, thickness t and conductivity k_w, length P (the trench equation):
-//       h_o² − h_i² = Q · 2t/(P k_w)            (b = 2t/(P k_w))
-//
-// so the leakage with the water inside at h_i is Q = (H² − h_i²)/(a + b), and h_o follows.
-// Inside, the aquifer is so much more permeable than the wall that the water is taken as level.
-// w = {P, Aw, t, kw, Sy}: wall length (m), area inside (m²), thickness (m), conductivity (m/s),
-// and the specific yield of the aquifer inside.
-// In transient flow the aquifer outside uses W(u)/2 at r_W for the time pumping in place of
-// ln(R/r_W).
-export function wallCoeffs(p, w) {
-  const rW = Math.sqrt(w.Aw / Math.PI);
-  const a = transient(p) ? 0.5 * wellW(rW * rW * p.Sy / (4 * p.k * p.H * p.t)) / (Math.PI * p.k)
-    : p.R > rW ? Math.log(p.R / rW) / (Math.PI * p.k) : 0;
-  const b = 2 * w.t / (w.P * w.kw);
-  return { a, b, rW };
-}
-
-// The leakage (m³/s) with the water inside at h_i.
-export function wallLeak(hIn, p, w) {
-  const { a, b } = wallCoeffs(p, w);
-  return (p.H * p.H - hIn * hIn) / (a + b);
-}
-
-// The head at the wall's outside face with the water inside at h_i.
-export function wallOutside(hIn, p, w) {
-  const { a } = wallCoeffs(p, w);
-  return Math.sqrt(Math.max(p.H * p.H - wallLeak(hIn, p, w) * a, 0));
-}
-
-// The steady water level inside when the wells pump Q in total: the leakage equals Q, so
-// h_i² = H² − Q(a + b). Pumping more than the wall can pass at h_i = 0 empties the inside.
-export function wallSteady(Q, p, w) {
-  const { a, b } = wallCoeffs(p, w);
-  const v = p.H * p.H - Q * (a + b);
-  return v > 0 ? Math.sqrt(v) : 0;
-}
-
-// Time (s) to draw the water inside down from H to h_to, pumping Q, with the leakage coming in:
-//     S_y A_w dh/dt = −Q + (H² − h²)/c,  c = a + b
-// so t = S_y A_w ∫ c dh / (h² − D) from h_to to H, D = H² − cQ. Infinite if Q can't get there
-// (Q ≤ the leakage at h_to).
-export function wallDrainTime(Q, p, w, hTo) {
-  const { a, b } = wallCoeffs(p, w), c = a + b, H = p.H;
-  if (!(hTo < H)) return 0;
-  const D = H * H - c * Q;
-  if (!(hTo * hTo > D)) return Infinity;
-  let I;
-  if (D < 0) { const m = Math.sqrt(-D); I = (Math.atan(H / m) - Math.atan(hTo / m)) / m; }
-  else if (D === 0) I = 1 / hTo - 1 / H;
-  else { const d = Math.sqrt(D); I = (Math.log((H - d) / (H + d)) - Math.log((hTo - d) / (hTo + d))) / (2 * d); }
-  return w.Sy * w.Aw * c * I;
-}
-
-// The water level inside the wall after pumping Q for time t (s), from the drain-down above:
-// the h at which the drain time from H equals t (bisection).
-export function wallLevelAt(Q, p, w, t) {
-  let lo = wallSteady(Q, p, w), hi = p.H;
-  if (!(t > 0)) return hi;
-  for (let i = 0; i < 80; i++) {
-    const mid = 0.5 * (lo + hi);
-    if (wallDrainTime(Q, p, w, mid) > t) lo = mid; else hi = mid;
-  }
-  return hi;
-}
-
-// The minimum design pumping rate with a cutoff wall: the smallest Q that draws the water inside
-// down to h_to within time T (s), and then holds it there. With no time limit (T not > 0) it is
-// the leakage at h_to.
-export function wallQmin(p, w, hTo, T) {
-  if (transient(p) && T > 0) return wallDeadlineRate(p, w, hTo, T);
-  const hold = wallLeak(hTo, p, w);
-  if (!(T > 0)) return hold;
-  let lo = hold, hi = Math.max(hold, 1e-9) * 2;
-  while (wallDrainTime(hi, p, w, hTo) > T) { lo = hi; hi *= 2; }
-  for (let i = 0; i < 100; i++) {
-    const mid = 0.5 * (lo + hi);
-    if (wallDrainTime(mid, p, w, hTo) > T) lo = mid; else hi = mid;
-  }
-  return hi;
-}
-
-// The pumping schedule with a cutoff wall, in transient flow. The water inside, taken as level,
-// follows S_y A_w dh/dt = −Q + (H² − h²)/(a(t) + b), with the outside resistance a(t) growing as
-// the drawdown spreads (stepped by the midpoint rule, 4000 steps to tEnd).
-//   drawdown: pump Q until the water inside reaches the target (tDew);
-//   hold: then, once a week, the leakage at the target, the lowest rate that holds it there for
-//     the week (the leakage only falls as a(t) grows).
-// Returns {sched, tDew, capped: false, levelAt(t)}: sched as for pumpSchedule.
-export function wallSchedule(p, w, target, Q, tEnd, step = 7 * 86400) {
-  const H2 = p.H * p.H, b = wallCoeffs(p, w).b, SA = w.Sy * w.Aw, N = 4000, dt = tEnd / N;
-  const a = (t) => wallCoeffs({ ...p, t: Math.max(t, 1) }, w).a;
-  const leak = (h, t) => (H2 - h * h) / (a(t) + b);
-  const sched = [{ t: 0, Q }], ts = [0], hs = [p.H];
-  let h = p.H, t = 0, q = Q, tDew = Infinity, next = Infinity;
-  const f = (hh, tt) => (-q + leak(hh, tt)) / SA;
-  while (t < tEnd - 1e-6) {
-    if (t >= next - 1e-6) { q = leak(target, t); if (q !== sched[sched.length - 1].Q) sched.push({ t, Q: q }); next += step; }
-    const d = Math.min(dt, tEnd - t, next - t);
-    const hn = Math.max(0, h + d * f(h + 0.5 * d * f(h, t), t + 0.5 * d));
-    if (tDew === Infinity && hn <= target) {         // dewatered within this step: hold from there
-      const tc = t + d * (h - target) / (h - hn);
-      ts.push(tc); hs.push(target);
-      t = tc; h = target; tDew = tc; next = tc;
-      continue;
+// opts: {wall: ring of {x, y} (or null for none), kw, t (wall thickness), tMax (s; transient)}.
+// Returns {at(points, tau) → Float64Array of u per unit rate per well, leak(tau) → the flow
+// through the wall per unit rate per well (m³/s), steady}.
+export function gridModel(wells, p, opts) {
+  const steady = !(p.Sy > 0 && opts.tMax > 0), wall = opts.wall;
+  // the core: the wall and the wells, with a margin
+  const xs0 = [...wells.map((w) => w.x), ...(wall || []).map((q) => q.x)], ys0 = [...wells.map((w) => w.y), ...(wall || []).map((q) => q.y)];
+  let x0 = Math.min(...xs0), x1 = Math.max(...xs0), y0 = Math.min(...ys0), y1 = Math.max(...ys0);
+  const span = Math.max(x1 - x0, y1 - y0, 20), h0 = Math.max(span / 90, 0.5);
+  x0 -= 4 * h0; x1 += 4 * h0; y0 -= 4 * h0; y1 += 4 * h0;
+  const reachFar = steady ? p.R * 1.05 + span : 3 * 1.5 * Math.sqrt(p.k * p.H * opts.tMax / p.Sy) + span;
+  // the core's lines are moved so each well sits at the center of its cell (where the head at its
+  // screen is best known), unless another well already holds that cell
+  const axis = (a, b, ws) => {
+    const n = Math.max(2, Math.ceil((b - a) / h0)), d = (b - a) / n, e = [], held = new Set();
+    for (let i = 0; i <= n; i++) e.push(a + d * i);
+    for (const v of ws) {
+      const k = Math.min(Math.max(Math.floor((v - a) / d), 1), n - 2);
+      if (held.has(k) || held.has(k - 1) || held.has(k + 1)) continue;
+      e[k] = v - d / 2; e[k + 1] = v + d / 2; held.add(k);
     }
-    t += d; h = hn; ts.push(t); hs.push(h);
-  }
-  const levelAt = (tt) => {
-    if (tt <= 0) return p.H;
-    let lo = 0, hi = ts.length - 1;
-    if (tt >= ts[hi]) return hs[hi];
-    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (ts[m] <= tt) lo = m; else hi = m; }
-    return hs[lo] + (hs[hi] - hs[lo]) * (tt - ts[lo]) / (ts[hi] - ts[lo]);
+    let w = d, lo = a, hi = b;
+    for (let i = 0; i < 60 && (b - lo < reachFar || hi - a < reachFar); i++) { w *= 1.25; lo -= w; hi += w; e.unshift(lo); e.push(hi); }
+    return e;
   };
-  return { sched, tDew, capped: false, levelAt };
-}
-
-// The smallest starting rate whose wall schedule dewaters by td (bisection on Q): at least the
-// leakage at the target on day td.
-export function wallDeadlineRate(p, w, target, td) {
-  const H2 = p.H * p.H, b = wallCoeffs(p, w).b, ok = (Q) => wallSchedule(p, w, target, Q, td * 1.001).tDew <= td;
-  let lo = (H2 - target * target) / (wallCoeffs({ ...p, t: td }, w).a + b), hi = 2 * lo;
-  while (!ok(hi)) { lo = hi; hi *= 2; }
-  for (let i = 0; i < 50 && hi - lo > 1e-6 * hi; i++) { const m = 0.5 * (lo + hi); if (ok(m)) hi = m; else lo = m; }
-  return hi;
+  const ex = axis(x0, x1, wells.map((w) => w.x)), ey = axis(y0, y1, wells.map((w) => w.y)), nx = ex.length - 1, ny = ey.length - 1, N = nx * ny;
+  const cx = Float64Array.from({ length: nx }, (_, i) => 0.5 * (ex[i] + ex[i + 1])), cy = Float64Array.from({ length: ny }, (_, j) => 0.5 * (ey[j] + ey[j + 1]));
+  const dx = Float64Array.from({ length: nx }, (_, i) => ex[i + 1] - ex[i]), dy = Float64Array.from({ length: ny }, (_, j) => ey[j + 1] - ey[j]);
+  const id = (i, j) => j * nx + i;
+  // which side of the wall each cell is on
+  const side = new Uint8Array(N);
+  if (wall) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) side[id(i, j)] = inside({ x: cx[i], y: cy[j] }, wall) ? 1 : 0;
+  // face conductances (east and north of each cell), the wall's faces marked
+  const cE = new Float64Array(N), cN = new Float64Array(N), wallFaces = [];
+  const face = (len, d, a, b) => {
+    if (!wall || side[a] === side[b]) return len * p.k / d;
+    wallFaces.push([a, b, len]);
+    return len / (Math.max(d - opts.t, 0) / p.k + opts.t / opts.kw);
+  };
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const a = id(i, j);
+    if (i + 1 < nx) cE[a] = face(dy[j], cx[i + 1] - cx[i], a, id(i + 1, j));
+    if (j + 1 < ny) cN[a] = face(dx[i], cy[j + 1] - cy[j], a, id(i, j + 1));
+  }
+  if (wall && wallFaces.length) {           // stair-stepped faces → the wall's true length
+    let P = 0, Ls = 0;
+    wall.forEach((q, i) => { const r = wall[(i + 1) % wall.length]; P += Math.hypot(r.x - q.x, r.y - q.y); });
+    wallFaces.forEach((f) => (Ls += f[2]));
+    const sc = P / Ls;
+    for (const f of wallFaces) {
+      const [a, b] = f, hor = b === a + 1;
+      if (hor) cE[a] *= sc; else cN[a] *= sc;
+      f.push(hor ? cE : cN);
+    }
+  }
+  // fixed head: the outer ring of cells (and, in steady flow, beyond R from the site's center)
+  const fixed = new Uint8Array(N), mx = 0.5 * (x0 + x1), my = 0.5 * (y0 + y1);
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++)
+    if (i === 0 || j === 0 || i === nx - 1 || j === ny - 1 || (steady && Math.hypot(cx[i] - mx, cy[j] - my) > p.R)) fixed[id(i, j)] = 1;
+  // the wells' cells and their sources (2q for q = 1 each)
+  const locate = (e, v) => { let lo = 0, hi = e.length - 2; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (e[m] <= v) lo = m; else hi = m - 1; } return lo; };
+  const src = new Float64Array(N), wcell = wells.map((w) => { const i = locate(ex, w.x), j = locate(ey, w.y); src[id(i, j)] += 2; return { i, j, re: 0.14 * Math.hypot(dx[i], dy[j]) }; });
+  // the operator: storage s (per cell, 0 in steady flow) plus the conductances
+  const area = new Float64Array(N);
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) area[id(i, j)] = dx[i] * dy[j];
+  const sumC = new Float64Array(N);
+  for (let a = 0; a < N; a++) {
+    const i = a % nx;
+    if (i + 1 < nx) { sumC[a] += cE[a]; sumC[a + 1] += cE[a]; }
+    if (a + nx < N) { sumC[a] += cN[a]; sumC[a + nx] += cN[a]; }
+  }
+  const matvec = (x, y, s) => {
+    for (let a = 0; a < N; a++) {
+      if (fixed[a]) { y[a] = x[a]; continue; }
+      let v = (s ? s * area[a] : 0) * x[a] + sumC[a] * x[a];
+      const i = a % nx;
+      if (i + 1 < nx && !fixed[a + 1]) v -= cE[a] * x[a + 1];
+      if (i > 0 && !fixed[a - 1]) v -= cE[a - 1] * x[a - 1];
+      if (a + nx < N && !fixed[a + nx]) v -= cN[a] * x[a + nx];
+      if (a >= nx && !fixed[a - nx]) v -= cN[a - nx] * x[a - nx];
+      y[a] = v;
+    }
+  };
+  // preconditioned conjugate gradients (Jacobi), from the guess in x
+  const r = new Float64Array(N), z = new Float64Array(N), d = new Float64Array(N), q = new Float64Array(N);
+  const solve = (b, x, s) => {
+    matvec(x, q, s);
+    let bn = 0;
+    for (let a = 0; a < N; a++) { r[a] = b[a] - q[a]; bn += b[a] * b[a]; }
+    const diag = (a) => (fixed[a] ? 1 : (s ? s * area[a] : 0) + sumC[a]);
+    let rz = 0;
+    for (let a = 0; a < N; a++) { z[a] = r[a] / diag(a); d[a] = z[a]; rz += r[a] * z[a]; }
+    const tol = 1e-20 * bn;
+    for (let it = 0; it < 4000; it++) {
+      let rr = 0;
+      for (let a = 0; a < N; a++) rr += r[a] * r[a];
+      if (rr <= tol) break;
+      matvec(d, q, s);
+      let dq = 0;
+      for (let a = 0; a < N; a++) dq += d[a] * q[a];
+      const al = rz / dq;
+      let rz2 = 0;
+      for (let a = 0; a < N; a++) { x[a] += al * d[a]; r[a] -= al * q[a]; z[a] = r[a] / diag(a); rz2 += r[a] * z[a]; }
+      const be = rz2 / rz;
+      rz = rz2;
+      for (let a = 0; a < N; a++) d[a] = z[a] + be * d[a];
+    }
+  };
+  // the response: steady, or stepped through time (backward Euler, steps growing 10% a step)
+  const times = [0], snaps = [new Float32Array(N)];
+  const u = new Float64Array(N), b = new Float64Array(N);
+  if (steady) {
+    for (let a = 0; a < N; a++) b[a] = fixed[a] ? 0 : src[a];
+    solve(b, u, 0);
+    times.push(1); snaps.push(Float32Array.from(u));
+  } else {
+    let t = 0, dt = 120;
+    while (t < opts.tMax) {
+      const s = p.Sy / (p.H * dt);
+      for (let a = 0; a < N; a++) b[a] = fixed[a] ? 0 : s * area[a] * u[a] + src[a];
+      solve(b, u, s);
+      t += dt; dt *= 1.1;
+      times.push(t); snaps.push(Float32Array.from(u));
+    }
+  }
+  // the field at any time: linear in ln t between the steps, rising from 0 over the first step
+  // [step before, step after, weight on the step before, scale]
+  const frame = (tau) => {
+    if (steady) return [1, 1, 0, 1];
+    if (!(tau > 0)) return [0, 0, 0, 0];
+    if (tau <= times[1]) return [1, 1, 0, tau / times[1]];
+    let k = 1;
+    while (k + 1 < times.length && times[k + 1] < tau) k++;
+    if (k + 1 >= times.length) return [k, k, 0, 1];
+    const g = Math.log(tau / times[k]) / Math.log(times[k + 1] / times[k]);
+    return [k, k + 1, 1 - g, 1];
+  };
+  const value = (U0, U1, g0, idx, wts) => { let v = 0; for (let m = 0; m < idx.length; m++) v += wts[m] * (g0 * U0[idx[m]] + (1 - g0) * U1[idx[m]]); return v; };
+  const near = (c, v) => { let lo = 0, hi = c.length - 2; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (c[m] <= v) lo = m; else hi = m - 1; } return lo; };
+  // interpolation weights for a set of points (kept per array): bilinear between cell centers,
+  // using only centers on the point's own side of the wall
+  const wcache = new WeakMap(), R0 = 3 * h0;
+  const S = (x, y, cell) => {
+    let v = 0;
+    wells.forEach((wl, n) => {
+      const own = cell === id(wcell[n].i, wcell[n].j), rr = own ? wcell[n].re : Math.max(Math.hypot(x - wl.x, y - wl.y), p.rw);
+      if (rr < R0) v += Math.log(R0 / rr) / (Math.PI * p.k);
+    });
+    return v;
+  };
+  const weights = (pts) => {
+    let w = wcache.get(pts);
+    if (w) return w;
+    w = pts.map((pt) => {
+      const i = near(cx, pt.x), j = near(cy, pt.y);
+      const fx = Math.min(Math.max((pt.x - cx[i]) / (cx[i + 1] - cx[i]), 0), 1), fy = Math.min(Math.max((pt.y - cy[j]) / (cy[j + 1] - cy[j]), 0), 1);
+      let idx = [id(i, j), id(i + 1, j), id(i, j + 1), id(i + 1, j + 1)], wts = [(1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy];
+      if (wall) {
+        const sd = inside(pt, wall) ? 1 : 0, keep = idx.map((a) => side[a] === sd);
+        if (keep.some((k) => !k)) {
+          let tot = 0;
+          wts = wts.map((v, m) => (keep[m] ? v : 0)); wts.forEach((v) => (tot += v));
+          if (tot > 1e-9) wts = wts.map((v) => v / tot);
+          else { const m = keep.indexOf(true); wts = wts.map((_, mm) => (mm === m ? 1 : 0)); if (m < 0) wts[0] = 1; }
+        }
+      }
+      // near the wells: the logarithmic cone is taken out of the cell values before interpolating
+      // and added back at the point itself (a well's own cell stands for the cone at r_e)
+      let cone = S(pt.x, pt.y, -1);
+      idx.forEach((a, m) => { if (wts[m]) cone -= wts[m] * S(cx[a % nx], cy[Math.floor(a / nx)], a); });
+      return { idx, wts, cone };
+    });
+    wcache.set(pts, w);
+    return w;
+  };
+  const at = (pts, tau) => {
+    const W = weights(pts), [k0, k1, g0, sc] = frame(tau), out = new Float64Array(pts.length);
+    if (!sc) return out;
+    const U0 = snaps[k0], U1 = snaps[k1];
+    for (let m = 0; m < pts.length; m++) { const w = W[m]; out[m] = sc * value(U0, U1, g0, w.idx, w.wts) + w.cone; }
+    return out;
+  };
+  // the flow through the wall into the inside (the u flux is twice the water's)
+  const leak = (tau) => {
+    if (!wall) return 0;
+    const [k0, k1, g0, sc] = frame(tau), U0 = snaps[k0], U1 = snaps[k1];
+    let s = 0;
+    for (const [a, bb, , C] of wallFaces) {
+      const ua = g0 * U0[a] + (1 - g0) * U1[a], ub = g0 * U0[bb] + (1 - g0) * U1[bb];
+      s += 0.5 * C[a] * (side[a] ? ua - ub : ub - ua);
+    }
+    return s * sc;
+  };
+  return { at, leak, steady, cells: N, steps: times.length - 1 };
 }

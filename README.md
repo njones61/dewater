@@ -42,11 +42,16 @@ A = Σ ln(R/rᵢ)/(πk) at each checked point. Points are checked on a grid over
 along its edge. A design fails if that rate would pump a well dry.
 
 With a cutoff wall keyed into an impermeable low-k layer, water reaches the inside only through
-the wall: the aquifer outside (the enclosure as one large well) and the wall (the trench equation
-across its thickness) act as two resistances in series, both linear in h², so the leakage is
-closed form. The water inside is taken as level. Q_min is then the smallest rate that draws the
-stored water down to the required level within the days allowed, with the leakage coming in (also
-closed form), and then holds it. See *How it works* in the app.
+the wall, and the aquifer is no longer uniform. The wells' influence then comes from a
+finite-difference model in the same h² form, (S_y/H) ∂u/∂t = ∇·(k∇u) + 2q, u = H² − h²: a grid fine
+over the wall and the wells, growing outward to a fixed head, with the wall as a barrier on the
+cell faces it crosses (its thickness at k_w, the trench equation across it). Each well sits at a
+cell center, and the head at its screen adds its own cone below the cell's size, so wells can go
+dry inside the wall too. The equation is linear in the rates, so the response is worked out once
+per layout and any pumping schedule superposes it, as with Theis; the schedule, Find Q_min, and the
+design curves are the same. With no wall the grid reproduces Theis to within a percent or two.
+Placed around the site, the wall follows the hull of the excavation and the wells at a setback.
+See *How it works* in the app.
 
 Transient flow replaces R with the specific yield S_y and the time pumping t: each well follows
 the Theis solution in the same h² form, H² − h² = (q / 2πk) W(u) with u = r² S_y / (4kHt), which
