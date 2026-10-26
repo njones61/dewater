@@ -1419,11 +1419,13 @@ function centerSection(dir) {
   const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), 20);
   const half = 0.5 * span + Math.max(0.9 * span, 60);
   let [a, b] = dir === "ew" ? [{ x: c.x - half, y: c.y }, { x: c.x + half, y: c.y }] : [{ x: c.x, y: c.y + half }, { x: c.x, y: c.y - half }];
-  // through the wells exactly: the water drops to a well's level only within its radius, so a line
-  // even half a meter off misses a dry well. The line runs through the well nearest the center
-  // line on each side (tilting a little when they don't line up), or is shifted across to the one
-  // well when one side has none.
+  // through the center of the excavation; or, with Through the wells, through the wells exactly:
+  // the water drops to a well's level only within its radius, so a line even half a meter off
+  // misses a dry well. The line then runs through the well nearest the center line on each side
+  // (tilting a little when they don't line up), or is shifted across to the one well when one
+  // side has none.
   const k = dir === "ew" ? "y" : "x", j = dir === "ew" ? "x" : "y";
+  if (!$("in-secwells").checked) { setSection(toLL(a), toLL(b)); state.secDir = dir; persist(); return; }
   const wl = state.wells.map((w) => toXY(w.marker.getLatLng()));
   const pick = (side) => wl.filter((v) => (side < 0 ? v[j] < c[j] : v[j] > c[j]))
     .reduce((u, v) => (!u || Math.abs(v[k] - c[k]) < Math.abs(u[k] - c[k]) ? v : u), null);
@@ -1444,6 +1446,7 @@ function followSection() {
   centerSection(state.secDir || (Math.abs(b.x - a.x) >= Math.abs(b.y - a.y) ? "ew" : "ns"));
 }
 $("btn-sec-ew").onclick = () => centerSection("ew");
+$("in-secwells").addEventListener("change", () => { if (state.section && state.secDir) centerSection(state.secDir); persist(); });
 $("btn-sec-ns").onclick = () => centerSection("ns");
 $("btn-sec-draw").onclick = () => {
   setAddMode(false);
@@ -1971,6 +1974,7 @@ function project() {
     lenUnit: lenUnit(),
     terrain: state.terrain,
     groundContours: $("in-gcont").checked,
+    secWells: $("in-secwells").checked,
     flow: flow(),
     wall: $("in-wall").checked,
     wallSrc: wallSrc(),
@@ -2021,6 +2025,7 @@ function restore(pr, fit = true) {
   if (pr.section) { setSection(L.latLng(...pr.section[0]), L.latLng(...pr.section[1])); state.secDir = pr.secDir || null; }
   syncCurveInputs(); showR(); buildRampPicker();
   $("in-gcont").checked = !!pr.groundContours; drawGround();
+  $("in-secwells").checked = !!pr.secWells;
   if (pr.terrain) { state.terrain = true; $("in-terrain").checked = true; $("in-gelev").readOnly = true; schedule(); }
   schedule();
 }

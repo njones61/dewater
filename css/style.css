@@ -194,3 +194,4 @@ button.small { font-size: 12px; padding: 2px 8px; }
 #wall-box > .switch { height: 30px; margin: 4px 0 10px; }
 #wall-box > .seg.small { margin: 0 0 4px; }
 #wall-box .fields { margin: 8px 0; }
+.switch.sec-wells { height: 30px; margin-top: 8px; }
