@@ -524,6 +524,7 @@ $("btn-generate").onclick = () => {
   clearWells();
   ringWells(n, off).forEach((ll) => addWell(ll, false));
   updateWellsInfo();
+  if (state.section && state.secDir) centerSection(state.secDir);   // the section follows the new wells
   schedule();
 };
 
@@ -1254,7 +1255,7 @@ state.section = null;          // [LatLng A, LatLng B]
 state.secDrawing = false;
 
 function setSection(a, b) {
-  state.section = [a, b];
+  state.section = [a, b]; state.secDir = null;
   $("section-panel").hidden = false;
   $("divider").hidden = false;
   map.invalidateSize();
@@ -1298,6 +1299,8 @@ function centerSection(dir) {
     [a, b] = [{ x: m0.x - ex * half, y: m0.y - ey * half }, { x: m0.x + ex * half, y: m0.y + ey * half }];
   } else if (w1 || w2) { a[k] = b[k] = (w1 || w2)[k]; }
   setSection(toLL(a), toLL(b));
+  state.secDir = dir;                     // so a new ring of wells redraws it through them
+  persist();
 }
 $("btn-sec-ew").onclick = () => centerSection("ew");
 $("btn-sec-ns").onclick = () => centerSection("ns");
@@ -1833,6 +1836,7 @@ function project() {
     wallRing: state.wall ? (() => { let ll = state.wall.getLatLngs(); while (Array.isArray(ll[0])) ll = ll[0]; return ll.map((q) => [q.lat, q.lng]); })() : null,
     view: { center: map.getCenter(), zoom: map.getZoom() },
     section: state.section ? state.section.map((q) => [q.lat, q.lng]) : null,
+    secDir: state.secDir || null,
   };
 }
 function restore(pr, fit = true) {
@@ -1873,7 +1877,7 @@ function restore(pr, fit = true) {
   (pr.wells || []).forEach(([lat, lng]) => addWell(L.latLng(lat, lng), false));
   updateWellsInfo();
   if (!fit && pr.view) map.setView(pr.view.center, pr.view.zoom);
-  if (pr.section) setSection(L.latLng(...pr.section[0]), L.latLng(...pr.section[1]));
+  if (pr.section) { setSection(L.latLng(...pr.section[0]), L.latLng(...pr.section[1])); state.secDir = pr.secDir || null; }
   syncCurveInputs(); showR(); buildRampPicker();
   $("in-gcont").checked = !!pr.groundContours; drawGround();
   if (pr.terrain) { state.terrain = true; $("in-terrain").checked = true; $("in-gelev").readOnly = true; schedule(); }
