@@ -5,7 +5,7 @@ import { elevations } from "./terrain.js";
 /* global L, turf, d3 */
 
 // ------------------------------------------------------------------ map
-const map = L.map("map", { zoomControl: true, preferCanvas: false }).setView([39.5, -98.35], 4);
+const map = L.map("map", { zoomControl: true, preferCanvas: false, zoomSnap: 0.25, zoomDelta: 0.5, wheelPxPerZoomLevel: 120 }).setView([39.5, -98.35], 4);
 const street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
   maxZoom: 20, maxNativeZoom: 19, attribution: "&copy; OpenStreetMap contributors",
 });
