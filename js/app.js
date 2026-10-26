@@ -426,7 +426,7 @@ $("btn-rect").onclick = () => {
   setAddMode(false);
   state.wallDrawing = false;
   map.pm.enableDraw("Rectangle", { pathOptions: EXC_STYLE });
-  tip("Drag a box for the excavation. Use Rotate to turn it to match the site.");
+  tip("Click one corner of the excavation, then the opposite corner. Use Rotate to turn it to match the site.");
 };
 $("btn-rotate").onclick = () => {
   if (!state.excavation) return;
@@ -436,7 +436,7 @@ $("btn-rotate").onclick = () => {
 };
 map.on("pm:create", (e) => {
   tip(null);
-  if (e.shape === "Polygon" && state.wallDrawing) { state.wallDrawing = false; setWall(e.layer); }
+  if ((e.shape === "Polygon" || e.shape === "Rectangle") && state.wallDrawing) { state.wallDrawing = false; setWall(e.layer); }
   else if (e.shape === "Polygon" || e.shape === "Rectangle") setExcavation(e.layer, false);
   else if (e.shape === "Line" && state.secDrawing) {
     state.secDrawing = false;
@@ -591,13 +591,10 @@ $("btn-wall-draw").onclick = () => {
 };
 $("btn-wall-start").onclick = () => {
   if (!state.excavation) return alertMsg("Draw or load the excavation first.");
-  const ring = offsetRingLL();
-  // the buffer's rounded corners make many vertices; keep the shape with fewer to drag
-  const line = turf.lineString([...ring, ring[0]].map((q) => [q.lng, q.lat]));
-  const simple = turf.simplify(line, { tolerance: 0.5 / M_LAT * 4, highQuality: true }).geometry.coordinates.slice(0, -1);
-  setWall(L.polygon(simple.map(([lng, lat]) => [lat, lng])).addTo(map));
-  state.wall.pm.enable({ allowSelfIntersection: false }); $("btn-wall-edit").textContent = "Done editing";
-  tip("Drag the corners to move the wall where the site allows.");
+  setAddMode(false);
+  state.wallDrawing = true;
+  map.pm.enableDraw("Rectangle", { pathOptions: WALL_STYLE });
+  tip("Click one corner of the wall, then the opposite corner, around the excavation and the wells.");
 };
 $("btn-wall-edit").onclick = () => {
   if (!state.wall) return;

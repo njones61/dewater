@@ -142,15 +142,15 @@
           </div>
           <div id="wall-drawn" hidden>
             <div class="btn-grid">
-              <button id="btn-wall-draw" class="primary">Draw wall</button>
-              <button id="btn-wall-start">Start from the offset</button>
+              <button id="btn-wall-start" class="primary">Draw rectangle</button>
+              <button id="btn-wall-draw">Draw polygon</button>
               <label class="file-btn">Load GeoJSON<input id="file-wall" type="file" accept=".geojson,.json" hidden></label>
               <button id="btn-wall-edit">Edit</button>
               <button id="btn-wall-delete">Delete</button>
               <button id="btn-wall-export">Download</button>
             </div>
-            <p class="hint">The wall must enclose the excavation. <b>Start from the offset</b> copies
-              the outline around the site so you can move its corners to fit.</p>
+            <p class="hint">The wall must enclose the excavation and the wells. <b>Draw rectangle</b>:
+              click two opposite corners. <b>Draw polygon</b>: click the corners. <b>Edit</b> moves the corners.</p>
           </div>
           <div class="fields two">
             <label id="woff-field"><span>Setback (<span class="uL">m</span>)</span><input id="in-woff" type="number" step="any" value="5"></label>
@@ -387,8 +387,8 @@
           the specific yield and the days to dewater.</li>
         <li>Click to place wells, or generate a ring at an offset from the edge.</li>
         <li>Optionally, enclose the site with a cutoff wall (a slurry trench): place the wall around the site (a rectangle
-          set out by the setback from the excavation and the wells, so it encloses both), or draw it, load it from GeoJSON, or start from the offset and move its corners
-          where the site allows; then give its thickness and conductivity and the days allowed to draw the water down (the specific yield is in step 2).</li>
+          set out by the setback from the excavation and the wells, so it encloses both), or draw it (a rectangle or a polygon) or load it from GeoJSON, and move its corners
+          where the site allows; then give its thickness and conductivity.</li>
         <li>Enter a pumping rate and check the results, or find Q<sub>min</sub>.</li>
         <li>Choose what the contours show: depth to water, water elevation (with a ground
           elevation), drawdown, water below the required level, or head above the low-k layer. The
@@ -416,6 +416,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-  <script type="module" src="js/app.js?v=57"></script>
+  <script type="module" src="js/app.js?v=59"></script>
 </body>
 </html>
