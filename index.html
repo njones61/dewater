@@ -338,8 +338,8 @@
         a steady R stands for that case.</p>
       <h3>A cutoff wall</h3>
       <p>A slurry cutoff wall around the site, keyed into the low-k layer, cuts off the inflow:
-        water reaches the inside only through the wall. Placed around the site, the wall follows
-        the hull of the excavation and the wells at the setback, so it encloses both. With a wall
+        water reaches the inside only through the wall. Placed around the site, the wall is a rectangle
+        set out by the setback from the excavation and the wells, so it encloses both. With a wall
         the aquifer is no longer uniform, so the wells' influence comes from a finite-difference
         model instead of the Theis solution, in the same h² form:</p>
       <p class="eq">(S<sub>y</sub>/H) ∂u/∂t = ∇·(k ∇u) + 2q at the wells, &nbsp; u = H² − h²</p>
@@ -386,8 +386,8 @@
           flow: steady, with R typed in or from Sichardt's or Kusakin's formula, or transient, with
           the specific yield and the days to dewater.</li>
         <li>Click to place wells, or generate a ring at an offset from the edge.</li>
-        <li>Optionally, enclose the site with a cutoff wall (a slurry trench): place the wall around the site (a setback
-          outside the hull of the excavation and the wells, so it encloses both), or draw it, load it from GeoJSON, or start from the offset and move its corners
+        <li>Optionally, enclose the site with a cutoff wall (a slurry trench): place the wall around the site (a rectangle
+          set out by the setback from the excavation and the wells, so it encloses both), or draw it, load it from GeoJSON, or start from the offset and move its corners
           where the site allows; then give its thickness and conductivity and the days allowed to draw the water down (the specific yield is in step 2).</li>
         <li>Enter a pumping rate and check the results, or find Q<sub>min</sub>.</li>
         <li>Choose what the contours show: depth to water, water elevation (with a ground
@@ -416,6 +416,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-  <script type="module" src="js/app.js?v=55"></script>
+  <script type="module" src="js/app.js?v=56"></script>
 </body>
 </html>

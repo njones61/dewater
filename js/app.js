@@ -541,17 +541,18 @@ function polyArea(r) {
 }
 const wallSrc = () => document.querySelector('input[name="wallsrc"]:checked').value;
 const WALL_STYLE = { color: "#3d4550", weight: 4, opacity: 1, fillOpacity: 0 };
-// The wall's outline: the hull around the excavation and every well, offset outward by the
-// setback, so the wall encloses both at a consistent distance (one well off to one side pulls
-// the wall out only there); or the wall drawn or loaded (null if there is none yet).
+// The wall's outline: a rectangle around the excavation and every well, set out by the setback
+// on every side, square-cornered and lined up with the excavation's longest side; or the wall
+// drawn or loaded (null if there is none yet).
 function offsetRingLL(wellLLs = state.wells.map((w) => w.marker.getLatLng())) {
-  const f = excFeature(), off = numL("in-woff");
-  const pts = f.geometry.coordinates[0].map((c) => turf.point(c));
-  wellLLs.forEach((ll) => pts.push(turf.point([ll.lng, ll.lat])));
-  const hull = turf.convex(turf.featureCollection(pts)) || f;
-  const buf = off > 0 ? turf.buffer(hull, off, { units: "meters", steps: 16 }) : hull;
-  const geom = buf.geometry.type === "MultiPolygon" ? buf.geometry.coordinates[0] : buf.geometry.coordinates;
-  return geom[0].slice(0, -1).map(([lng, lat]) => L.latLng(lat, lng));
+  const ex = excRing().map(toXY), off = numL("in-woff");
+  let ang = 0, best = -1;
+  ex.forEach((q, i) => { const r = ex[(i + 1) % ex.length], L2 = (r.x - q.x) ** 2 + (r.y - q.y) ** 2; if (L2 > best) { best = L2; ang = Math.atan2(r.y - q.y, r.x - q.x); } });
+  const c = Math.cos(ang), sn = Math.sin(ang);
+  const pts = [...ex, ...wellLLs.map(toXY)].map((q) => ({ u: q.x * c + q.y * sn, v: -q.x * sn + q.y * c }));
+  const u0 = Math.min(...pts.map((q) => q.u)) - off, u1 = Math.max(...pts.map((q) => q.u)) + off;
+  const v0 = Math.min(...pts.map((q) => q.v)) - off, v1 = Math.max(...pts.map((q) => q.v)) + off;
+  return [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(([u, v]) => toLL({ x: u * c - v * sn, y: u * sn + v * c }));
 }
 function wallRingLL(wellLLs) {
   if (wallSrc() === "offset") return offsetRingLL(wellLLs);

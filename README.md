@@ -50,7 +50,7 @@ cell center, and the head at its screen adds its own cone below the cell's size,
 dry inside the wall too. The equation is linear in the rates, so the response is worked out once
 per layout and any pumping schedule superposes it, as with Theis; the schedule, Find Q_min, and the
 design curves are the same. With no wall the grid reproduces Theis to within a percent or two.
-Placed around the site, the wall follows the hull of the excavation and the wells at a setback.
+Placed around the site, the wall is a rectangle set out by a setback from the excavation and the wells.
 See *How it works* in the app.
 
 Transient flow replaces R with the specific yield S_y and the time pumping t: each well follows
