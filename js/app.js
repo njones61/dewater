@@ -1,5 +1,5 @@
 // app.js — the map, the panel, and the drawing of results. The calculation is in model.js.
-import { heads, schedHeads, pumpSchedule, deadlineRate, optimalRate, optimalWith, gridModel, reach, grid, inside, densify } from "./model.js?v=8";
+import { heads, schedHeads, pumpSchedule, deadlineRate, optimalRate, optimalWith, gridModel, reach, grid, inside, densify } from "./model.js?v=9";
 import { elevations } from "./terrain.js";
 
 /* global L, turf, d3 */
@@ -487,9 +487,9 @@ function clearWells() {
   updateWellsInfo();
   schedule();
 }
-function updateWellsInfo() {
+function updateWellsInfo(note = "") {
   const n = state.wells.length;
-  $("wells-info").textContent = n ? `${n} well${n > 1 ? "s" : ""}.` : "No wells yet.";
+  $("wells-info").textContent = (n ? `${n} well${n > 1 ? "s" : ""}.` : "No wells yet.") + (note ? ` ${note}` : "");
 }
 function setAddMode(on) {
   state.addMode = on;
@@ -502,10 +502,42 @@ $("btn-add-wells").onclick = () => { map.pm.disableDraw(); setAddMode(!state.add
 $("btn-clear-wells").onclick = clearWells;
 map.on("click", (e) => { if (state.addMode) addWell(e.latlng); });
 
-// A ring of n wells, evenly spaced along the outline offset outward from the excavation.
+// The excavation's frame: the direction of its longest side, and its extent along it (u) and
+// across it (v), in meters from the origin.
+function excFrame() {
+  const ex = excRing().map(toXY);
+  let ang = 0, best = -1;
+  ex.forEach((q, i) => { const r = ex[(i + 1) % ex.length], L2 = (r.x - q.x) ** 2 + (r.y - q.y) ** 2; if (L2 > best) { best = L2; ang = Math.atan2(r.y - q.y, r.x - q.x); } });
+  const c = Math.cos(ang), s = Math.sin(ang), uv = ex.map((q) => ({ u: q.x * c + q.y * s, v: -q.x * s + q.y * c }));
+  return { c, s, u0: Math.min(...uv.map((q) => q.u)), u1: Math.max(...uv.map((q) => q.u)), v0: Math.min(...uv.map((q) => q.v)), v1: Math.max(...uv.map((q) => q.v)) };
+}
+// A symmetric ring on the rectangle set out by the offset around the excavation's frame: a wells
+// on each long side (the same positions on both), the rest on the ends (the same on both; with an
+// odd n, one long side takes the extra well). On a side of length L, m wells sit at
+// −L/2 + L (i + α)/(m − 1 + 2α): α = ½ spaces them evenly with half a space at each end; a larger
+// α draws them in toward the middle of the side.
+function layoutWells(n, offset, a, ax = 0.5, ay = 0.5) {
+  const { c, s, u0, u1, v0, v1 } = excFrame(), X = (u1 - u0) / 2 + offset, Y = (v1 - v0) / 2 + offset, uc = (u0 + u1) / 2, vc = (v0 + v1) / 2;
+  const b = Math.floor((n - 2 * a) / 2), extra = n - 2 * a - 2 * b;
+  const pos = (m, L, al) => (m === 1 ? [0] : Array.from({ length: m }, (_, i) => -L / 2 + L * (i + al) / (m - 1 + 2 * al)));
+  const out = [], P = (u, v) => out.push(toLL({ x: (uc + u) * c - (vc + v) * s, y: (uc + u) * s + (vc + v) * c }));
+  pos(a + extra, 2 * X, ax).forEach((u) => P(u, -Y));
+  pos(a, 2 * X, ax).forEach((u) => P(u, Y));
+  if (b > 0) pos(b, 2 * Y, ay).forEach((v) => { P(-X, v); P(X, v); });
+  return out;
+}
+// The even ring: the wells shared between the long sides and the ends in proportion to their
+// lengths, evenly spaced (α = ½).
+function evenSplit(n, offset) {
+  const { u0, u1, v0, v1 } = excFrame(), LX = u1 - u0 + 2 * offset, LY = v1 - v0 + 2 * offset;
+  return Math.min(Math.max(Math.round(Math.floor(n / 2) * LX / (LX + LY)), 1), Math.floor(n / 2) - 1);
+}
+// A ring of n wells around the excavation: the even symmetric ring (fewer than four wells: evenly
+// spaced along the outline offset outward).
 function ringWells(n, offset) {
   const f = excFeature();
   if (!f) return null;
+  if (n >= 4) return layoutWells(n, offset, evenSplit(n, offset));
   const buf = offset > 0 ? turf.buffer(f, offset, { units: "meters", steps: 16 }) : f;
   const geom = buf.geometry.type === "MultiPolygon" ? buf.geometry.coordinates[0] : buf.geometry.coordinates;
   const line = turf.lineString(geom[0]);
@@ -526,6 +558,95 @@ $("btn-generate").onclick = () => {
   updateWellsInfo();
   if (state.section && state.secDir) centerSection(state.secDir);   // the section follows the new wells
   schedule();
+};
+
+// Optimize the layout: the symmetric ring (layoutWells) that needs the least pumping for the
+// number of wells, the offset, and the design (the deadline in transient flow). A quick pass ranks
+// every split between the long sides and the ends and a range of spacings by the constant rate
+// that dewaters by the deadline (Theis); a pattern search refines the best; then the full design
+// (the deadline schedule with its cut-backs, and the grid model with a wall) decides among the
+// leaders and the even ring.
+$("btn-layout").onclick = () => {
+  if (!state.excavation) return alertMsg("Draw or load the excavation first.");
+  const n = Math.round(num("in-nwells")), off = numL("in-offset"), p = params(), err = checkParams({ ...p, Q: 0 });
+  if (err) return setStatus("bad", err);
+  if (!(n >= 4) || !(off >= 0)) return alertMsg("Enter at least four wells and an offset of zero or more.");
+  stopAnim(); state.viewT = null;
+  const tr = p.t !== undefined, td = tDesign(), cp = checkPoints(excRing().map(toXY)), half = Math.floor(n / 2);
+  const btn = $("btn-layout"), label = btn.textContent, id = ++curveRun;
+  const quick = (c) => {
+    const w = layoutWells(n, off, c.a, c.ax, c.ay).map(toXY);
+    const o = tr ? optimalRate(cp, w, { ...p, t: td, fastW: true }, p.target) : optimalWithR(cp, w, p);
+    return { ...c, Q: o.Q, ok: o.feasible };
+  };
+  const full = (c) => {
+    const ll = layoutWells(n, off, c.a, c.ax, c.ay), w = ll.map(toXY), fi = infFor(p, ll);
+    if (tr) { const d = deadlineRate(cp, w, p, p.target, td, tEnd(), fi); return { ...c, Q: d ? d.Q : Infinity, met: !!(d && d.met), tDew: d ? d.tDew : Infinity }; }
+    const o = fi ? optimalWith(cp, w, p, p.target, (pts) => fi(pts, 0)) : optimalWithR(cp, w, p);
+    return { ...c, Q: o.Q, met: o.feasible };
+  };
+  const better = (x, y) => (x.met !== y.met ? x.met : x.met ? x.Q < y.Q : x.tDew < y.tDew);
+  const A = [0.25, 0.5, 0.75, 1, 1.5, 2.5], cands = [];
+  for (let a = 1; a < half; a++) for (const ax of A) for (const ay of A) cands.push({ a, ax, ay });
+  const ranked = [];
+  let i = 0;
+  const pass1 = () => {
+    if (id !== curveRun) return;
+    for (let k = 0; k < 25 && i < cands.length; k++, i++) ranked.push(quick(cands[i]));
+    btn.textContent = `Optimizing\u2026 ${Math.round(60 * i / cands.length)}%`;
+    if (i < cands.length) return setTimeout(pass1, 0);
+    setTimeout(refine, 0);
+  };
+  const refine = () => {
+    // a pattern search from the best feasible and the best overall, in the spacings
+    const by = (r) => r.ok ? r.Q : r.Q * 1e3;
+    ranked.sort((x, y) => x.Q - y.Q);
+    const seeds = [ranked.find((r) => r.ok), ranked[0]].filter(Boolean);
+    for (const sd of seeds) {
+      let cur = sd;
+      for (let st = 0.25; st >= 0.03; st /= 2) {
+        let moved = true;
+        while (moved) {
+          moved = false;
+          for (const [dx, dy] of [[st, 0], [-st, 0], [0, st], [0, -st]]) {
+            const ax = cur.ax + dx, ay = cur.ay + dy;
+            if (ax < 0.05 || ay < 0.05 || ax > 5 || ay > 5) continue;
+            const r = quick({ a: cur.a, ax, ay });
+            if (by(r) < by(cur)) { cur = r; moved = true; ranked.push(r); }
+          }
+        }
+      }
+    }
+    // the leaders, one per split (feasible first), and the even ring
+    ranked.sort((x, y) => x.Q - y.Q);
+    const pick = [], seen = new Set();
+    for (const r of [...ranked.filter((q) => q.ok), ...ranked]) {
+      const k = `${r.a}|${r.ok}`;
+      if (!seen.has(k)) { seen.add(k); pick.push(r); }
+      if (pick.length >= 3) break;
+    }
+    const even = { a: evenSplit(n, off), ax: 0.5, ay: 0.5, even: true };
+    const todo = [even, ...pick], done = [];
+    const pass2 = () => {
+      if (id !== curveRun) return;
+      done.push(full(todo[done.length]));
+      btn.textContent = `Optimizing\u2026 ${60 + Math.round(40 * done.length / todo.length)}%`;
+      if (done.length < todo.length) return setTimeout(pass2, 0);
+      btn.textContent = label;
+      const ev = done[0], best = done.reduce((u, v) => (better(v, u) ? v : u));
+      clearWells();
+      layoutWells(n, off, best.a, best.ax, best.ay).forEach((ll) => addWell(ll, false));
+      const b = Math.floor((n - 2 * best.a) / 2);
+      const gain = ev.met && best.met ? ` ${fmt(100 * (1 - best.Q / ev.Q), 1)}% less pumping than the even ring.` : !ev.met && best.met ? " The even ring can't meet the deadline; this one can." : "";
+      updateWellsInfo(best === ev ? "The even ring is already the best layout." : `Optimized: ${n - 2 * b - best.a === best.a ? `${best.a} on each long side` : `${n - 2 * b - best.a} and ${best.a} on the long sides`}, ${b} on each end.${gain}`);
+      if (state.section && state.secDir) centerSection(state.secDir);
+      persist();
+      $("btn-optimize").click();                 // the design rate for the new layout
+    };
+    setTimeout(pass2, 0);
+  };
+  btn.textContent = "Optimizing\u2026";
+  setTimeout(pass1, 30);
 };
 
 // ------------------------------------------------------------------ cutoff wall
@@ -691,6 +812,7 @@ function run() {
   const ring = ringLL ? ringLL.map(toXY) : null;
   const wells = state.wells.map((w) => toXY(w.marker.getLatLng()));
   if (!wells.length) return setStatus("idle", "Add wells: click on the map, or generate a ring.");
+  if ($("in-wall").checked && !ring) return setStatus("bad", "The cutoff wall needs the excavation it encloses: draw or load it in step 1.");
   // with a cutoff wall, the wells' influence comes from the grid model (Theis without one)
   let wallG = null, gm = null;
   if (ring && wallOn()) {

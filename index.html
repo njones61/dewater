@@ -126,7 +126,14 @@
             <label><span>Offset from the edge (<span class="uL">m</span>)</span><input id="in-offset" type="number" step="any" value="15"></label>
             <label>Number of wells<input id="in-nwells" type="number" step="1" min="3" value="16"></label>
           </div>
-          <button id="btn-generate" class="primary">Generate wells</button>
+          <div class="row even">
+            <button id="btn-generate" class="primary">Generate wells</button>
+            <button id="btn-layout">Optimize the layout</button>
+          </div>
+          <p class="hint"><b>Generate</b> spaces the wells evenly, the same on opposite sides.
+            <b>Optimize</b> finds the symmetric spacing that needs the least pumping for the design
+            (in transient flow, the deadline): often more wells on the long sides, drawn in toward
+            their middles. It takes up to a minute.</p>
         </details>
         <p class="readout" id="wells-info">No wells yet.</p>
       </section>
@@ -416,6 +423,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-  <script type="module" src="js/app.js?v=63"></script>
+  <script type="module" src="js/app.js?v=65"></script>
 </body>
 </html>

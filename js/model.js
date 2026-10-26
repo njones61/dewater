@@ -75,7 +75,7 @@ export const reach = (p) => 1.5 * Math.sqrt(p.k * p.H * p.t / p.Sy);
 // {x, y} in meters.
 export function influence(points, wells, p) {
   const A = new Float64Array(points.length);
-  const c = 1 / (Math.PI * p.k), f = kernel(p);
+  const c = 1 / (Math.PI * p.k), f = kernel(p, !!p.fastW);
   for (let j = 0; j < points.length; j++) {
     const { x, y } = points[j];
     let s = 0;
@@ -333,12 +333,18 @@ export function deadlineRate(checkPoints, wells, p, target, td, tEnd, inf = null
     const mid = 0.5 * (lo + hi);
     if (run(mid).tDew <= td) hi = mid; else lo = mid;
   }
-  for (let it = 0; it < 20; it++) {                 // confirm with every check point
-    const r = run(hi, checkPoints);
-    if (r.tDew <= td) return { Q: hi, met: true, tDew: r.tDew, capped: r.capped, sched: r.sched };
-    hi *= 1.002;
+  // confirm with every check point; if the few points missed the one that governs, bisect again
+  // on all of them, up to the fastest schedule
+  let r = run(hi, checkPoints);
+  if (r.tDew <= td) return { Q: hi, met: true, tDew: r.tDew, capped: r.capped, sched: r.sched };
+  const fa = run(Infinity, checkPoints);
+  if (!(fa.tDew <= td)) return { Q: fa.sched[0].Q, met: false, tDew: fa.tDew, capped: true, sched: fa.sched };
+  lo = hi; hi = fa.sched[0].Q; r = fa;
+  for (let it = 0; it < 40 && hi - lo > 1e-3 * hi; it++) {
+    const mid = 0.5 * (lo + hi), m = run(mid, checkPoints);
+    if (m.tDew <= td) { hi = mid; r = m; } else lo = mid;
   }
-  return { Q: hi, met: true, tDew: td, capped: true, sched: null };
+  return { Q: hi, met: true, tDew: r.tDew, capped: r.capped, sched: r.sched };
 }
 
 // optimalRate with another influence, A(points) per unit rate per well (the grid model): the
