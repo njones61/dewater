@@ -586,8 +586,8 @@ $("btn-wall-draw").onclick = () => {
   if (!state.excavation) return alertMsg("Draw or load the excavation first.");
   setAddMode(false);
   state.wallDrawing = true;
-  map.pm.enableDraw("Polygon", { templineStyle: WALL_STYLE, hintlineStyle: { color: "#3d4550", dashArray: "5,5" }, pathOptions: WALL_STYLE });
-  tip("Click the corners of the wall, around the excavation. Click the first corner to finish.");
+  map.pm.enableDraw("Polygon", { templineStyle: WALL_STYLE, hintlineStyle: { color: "#3d4550", dashArray: "5,5" }, pathOptions: WALL_STYLE, finishOn: "dblclick" });
+  tip("Click the corners of the wall, around the excavation and the wells. Double-click, or click the first corner, to finish; Esc or Delete cancels.");
 };
 $("btn-wall-start").onclick = () => {
   if (!state.excavation) return alertMsg("Draw or load the excavation first.");
@@ -603,6 +603,8 @@ $("btn-wall-edit").onclick = () => {
   else { state.wall.pm.enable({ allowSelfIntersection: false }); $("btn-wall-edit").textContent = "Done editing"; tip("Drag the corners to reshape the wall."); }
 };
 $("btn-wall-delete").onclick = () => {
+  // also cancels a wall still being drawn (a polygon is finished only on its first corner)
+  if (state.wallDrawing) { map.pm.disableDraw(); state.wallDrawing = false; tip(null); }
   if (!state.wall) return;
   if (state.wall.pm.enabled()) state.wall.pm.disable();
   map.removeLayer(state.wall); state.wall = null;
@@ -1956,7 +1958,7 @@ function readFile(file, cb) { if (!file) return; const r = new FileReader(); r.o
 
 document.querySelectorAll("[data-close]").forEach((b) => (b.onclick = () => b.closest("dialog").close()));
 $("btn-help").onclick = () => $("dlg-help").showModal();
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") { setAddMode(false); state.secDrawing = false; map.pm.disableDraw(); tip(null); } });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { setAddMode(false); state.secDrawing = false; state.wallDrawing = false; map.pm.disableDraw(); tip(null); } });
 
 // ------------------------------------------------------------------ start
 try {
