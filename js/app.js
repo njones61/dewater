@@ -35,7 +35,9 @@ function fitSite() {
   // results, the excavation and the wells
   if (state.last && state.origin) {
     const [x0, x1, y0, y1] = state.last.box;
-    return map.fitBounds(L.latLngBounds(toLL({ x: x0, y: y0 }), toLL({ x: x1, y: y1 })), { padding: [8, 8], maxZoom: 19 });
+    // centered in the part of the map not covered by the time bar
+    const bar = $("anim-bar").hidden ? 0 : $("anim-bar").offsetHeight;
+    return map.fitBounds(L.latLngBounds(toLL({ x: x0, y: y0 }), toLL({ x: x1, y: y1 })), { paddingTopLeft: [8, 8], paddingBottomRight: [8, 8 + bar], maxZoom: 19 });
   }
   let b = null;
   const add = (x) => { b = b ? b.extend(x) : L.latLngBounds(x, x); };
