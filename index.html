@@ -137,7 +137,7 @@
           <p class="hint">An alternative to more wells: a wall around the site cuts off the inflow.</p>
           <label class="switch"><input id="in-wall" type="checkbox"><span>Enclose the site with a cutoff wall</span></label>
           <div class="seg small" role="radiogroup" aria-label="Where the wall runs">
-            <label><input type="radio" name="wallsrc" value="offset" checked> Offset from the edge</label>
+            <label><input type="radio" name="wallsrc" value="offset" checked> Outside the wells</label>
             <label><input type="radio" name="wallsrc" value="drawn"> Drawn or loaded</label>
           </div>
           <div id="wall-drawn" hidden>
@@ -153,7 +153,7 @@
               the offset outline so you can move its corners to fit the site.</p>
           </div>
           <div class="fields two">
-            <label id="woff-field"><span>Offset from the edge (<span class="uL">m</span>)</span><input id="in-woff" type="number" step="any" value="20"></label>
+            <label id="woff-field"><span>Offset outside the wells (<span class="uL">m</span>)</span><input id="in-woff" type="number" step="any" value="5"></label>
             <label><span>Thickness, t (<span class="uL">m</span>)</span><input id="in-wthick" type="number" step="any" value="0.9"></label>
             <label class="span2"><span>Wall conductivity, k<sub>w</sub></span>
               <span class="pair"><input id="in-kw" type="number" step="any" value="1e-7">
@@ -390,8 +390,8 @@
           flow: steady, with R typed in or from Sichardt's or Kusakin's formula, or transient, with
           the specific yield and the days to dewater.</li>
         <li>Click to place wells, or generate a ring at an offset from the edge.</li>
-        <li>Optionally, enclose the site with a cutoff wall (a slurry trench): place the wall at an offset from the
-          edge, or draw it, load it from GeoJSON, or start from the offset and move its corners
+        <li>Optionally, enclose the site with a cutoff wall (a slurry trench): place the wall at an offset outside the
+          wells (measured from the farthest well, so every well is inside), or draw it, load it from GeoJSON, or start from the offset and move its corners
           where the site allows; then give its thickness and conductivity and the days allowed to draw the water down (the specific yield is in step 2).</li>
         <li>Enter a pumping rate and check the results, or find Q<sub>min</sub>.</li>
         <li>Choose what the contours show: depth to water, water elevation (with a ground
@@ -420,6 +420,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-  <script type="module" src="js/app.js?v=51"></script>
+  <script type="module" src="js/app.js?v=52"></script>
 </body>
 </html>

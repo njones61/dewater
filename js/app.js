@@ -545,10 +545,20 @@ function polyArea(r) {
 }
 const wallSrc = () => document.querySelector('input[name="wallsrc"]:checked').value;
 const WALL_STYLE = { color: "#3d4550", weight: 4, opacity: 1, fillOpacity: 0 };
-// The wall's outline: the excavation's offset outward, or the wall drawn or loaded (null if
-// there is none yet).
+// The wall's outline: the excavation's outline offset outward past the farthest well by the
+// wall offset, so the wells are always inside, or the wall drawn or loaded (null if there is
+// none yet).
+function wellReach(f) {
+  const edge = turf.polygonToLine(f);
+  let d = 0;
+  for (const w of state.wells) {
+    const ll = w.marker.getLatLng(), pt = turf.point([ll.lng, ll.lat]);
+    if (!turf.booleanPointInPolygon(pt, f)) d = Math.max(d, turf.pointToLineDistance(pt, edge.type === "FeatureCollection" ? edge.features[0] : edge, { units: "meters" }));
+  }
+  return d;
+}
 function offsetRingLL() {
-  const f = excFeature(), off = numL("in-woff");
+  const f = excFeature(), off = wellReach(f) + numL("in-woff");
   const buf = off > 0 ? turf.buffer(f, off, { units: "meters", steps: 16 }) : f;
   const geom = buf.geometry.type === "MultiPolygon" ? buf.geometry.coordinates[0] : buf.geometry.coordinates;
   return geom[0].slice(0, -1).map(([lng, lat]) => L.latLng(lat, lng));
