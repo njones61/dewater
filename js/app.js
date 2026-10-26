@@ -36,12 +36,10 @@ function fitSite() {
   if (state.excavation) { const eb = state.excavation.getBounds(); add(eb.getSouthWest()); add(eb.getNorthEast()); }
   if (state.wall && map.hasLayer(state.wall)) { const wb = state.wall.getBounds(); add(wb.getSouthWest()); add(wb.getNorthEast()); }
   state.wells.forEach((w) => add(w.marker.getLatLng()));
-  if (state.last && state.origin) {
-    const [x0, x1, y0, y1] = state.last.box;
-    add(toLL({ x: x0, y: y0 })); add(toLL({ x: x1, y: y1 }));
-  }
+  if (state.last && state.last.wall) state.last.wall.ringLL.forEach(add);
   if (!b) return tip("Nothing to fit yet: draw an excavation or add wells.", 2500);
-  map.fitBounds(b, { padding: [24, 24], maxZoom: 19 });
+  // the site itself (excavation, wells, wall) with a margin, not the whole results grid
+  map.fitBounds(b.pad(0.15), { padding: [24, 24], maxZoom: 19 });
 }
 map.pm.setGlobalOptions({ snappable: true, allowSelfIntersection: false });
 map.pm.setLang("en");
