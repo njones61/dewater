@@ -66,9 +66,11 @@ and gives the water pumped. Transient is the default: the deadline sets the rate
 
 The design takes the water table to drain as soon as the heads fall. In layered soil (kh several
 times kv) it drains late, catching up in about 4 Sy H / kv (Neuman's delayed yield). Given the
-anisotropy kh/kv, the app reports that time and warns when the deadline is under half of it: a
-radius-and-depth model of a ring of wells needed about 10% more pumping at a third of that time and
-25 to 60% more at a tenth or less. It warns; it does not correct.
+anisotropy kh/kv, the app reports that time. A sweep of 108 radius-and-depth models of a ring of
+wells (thickness 10 to 60 m, kh 1e-6 to 1e-4 m/s, Sy 0.1 and 0.25, kh/kv 1 and 10, rings of 25 to
+200 m) put the extra pumping on one curve against the deadline over that time; the app takes its
+worst case as a margin (about 9% at 1/2, 14% at 1/3, 40% at 0.1), warns when it reaches 10%, and
+gives a suggested pump capacity, the starting rate plus the margin. It does not change the design.
 
 This is a screening tool for teaching and preliminary design.
 

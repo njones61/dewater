@@ -927,7 +927,12 @@ function run() {
     rows.push(["R from the formula", fmtL(p.R, 0)]);
   }
   if (tr) rows.push(["Spread of the drawdown, 1.5√(kHt/S<sub>y</sub>)", fmtL(p.R, 0)]);
-  if (tr) rows.push(["Water-table drainage time, 4 S<sub>y</sub>H/k<sub>v</sub>", `${dayN(drainTime(p))} days`]);
+  if (tr) {
+    const m = drainMargin(p, td);
+    rows.push(["Water-table drainage time, 4 S<sub>y</sub>H/k<sub>v</sub>", `${dayN(drainTime(p))} days`]);
+    if (sched) rows.push(["Drainage margin (worst case)", m === Infinity ? "more than 100%" : `${fmt(100 * m, 0)}%`],
+      ["Suggested pump capacity", m === Infinity ? "check with a layered model" : fmtQ(p.Q * (1 + m))]);
+  }
   if (gm) rows.push([tr ? `Leakage through the wall, day ${dayN(p.t)}` : "Leakage through the wall", fmtQ(leakNow)]);
   rows.push(st && st.elev ? ["Lowest water, at a well, elevation", E(Math.min(...hw))] : st ? ["Deepest water, at a well", `${fmtL(st.dbase - Math.min(...hw), 2)} below ground`] : ["Lowest head at a well", fmtL(Math.min(...hw), 2)]);
   $("results").innerHTML = rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("");
@@ -953,18 +958,32 @@ function run() {
 }
 
 // Delayed drainage. The design takes the water table to give up its specific yield as soon as the
-// heads fall; in fact it drains only as fast as water moves down through the soil, which in
-// layered soil (kv well below kh) is slow. The water table catches up in about 4 Sy H / kv
-// (Neuman's delayed yield). A model of the ring in radius and depth, against the depth-averaged
-// one used here, put the extra pumping the deadline takes at about 10% when the deadline is a third
-// of that time and 25 to 60% when it is a tenth or less; a few percent past half of it, where no
-// warning is given. It is a warning, not a correction.
+// heads fall; in fact it drains only as fast as water moves down through the soil to the screens,
+// slowly in silty soil and slower still in layered soil (kv below kh). The water table catches up
+// in about 4 Sy H / kv (Neuman's delayed yield). A sweep of 108 models of a ring of wells in radius
+// and depth (thickness 10 to 60 m, kh 1e-6 to 1e-4 m/s, Sy 0.1 and 0.25, kh/kv 1 and 10, rings of
+// 25 to 200 m), against the depth-averaged model used here, put the extra pumping a deadline takes
+// on one curve against x = deadline / (4 Sy H / kv). The margin is that curve's upper edge (the
+// worst case at each x, over the designs whose drawdown reaches the center by the deadline). A
+// warning and a margin, not a correction.
 const drainTime = (p) => 4 * p.Sy * p.H / (p.k / (p.aniso || 1));
+const MARGIN = [[0.02, 1.32], [0.05, 0.70], [0.1, 0.40], [0.2, 0.22], [0.33, 0.135], [0.5, 0.09], [0.75, 0.06], [1, 0.046], [1.5, 0.031]];
+function drainMargin(p, td) {
+  const x = td / drainTime(p), M = MARGIN;
+  if (!(x > 0)) return NaN;
+  if (x <= M[0][0]) return Infinity;                       // beyond the sweep: more than double
+  if (x >= M[M.length - 1][0]) return M[M.length - 1][1] * M[M.length - 1][0] / x;
+  let i = 0;
+  while (M[i + 1][0] < x) i++;
+  const g = Math.log(x / M[i][0]) / Math.log(M[i + 1][0] / M[i][0]);
+  return Math.exp(Math.log(M[i][1]) + g * Math.log(M[i + 1][1] / M[i][1]));
+}
 function layerWarning(p, td) {
-  const x = td / drainTime(p);
-  if (!(x < 0.5)) return "";                 // a few percent at most: no warning
-  const more = x < 0.1 ? "roughly 25 to 60%" : x < 0.2 ? "roughly 25 to 35%" : "about 10%";
-  return ` The water table drains slowly here (about ${dayN(drainTime(p))} days to catch up, against ${dayN(td)} allowed), so meeting the deadline may take ${more} more pumping than shown.`;
+  const m = drainMargin(p, td);
+  if (!(m >= 0.1)) return "";                // under 10%: no warning
+  return ` The water table drains slowly here (about ${dayN(drainTime(p))} days to catch up, against ${dayN(td)} allowed): `
+    + (m === Infinity ? "the pumping could be more than double what is shown; check the design with a layered numerical model."
+      : `allow up to ${fmt(100 * m, 0)}% more pumping. Suggested pump capacity: ${fmtQ(p.Q * (1 + m))}.`);
 }
 
 // The status line for a transient design: on the design day, whether the schedule meets the

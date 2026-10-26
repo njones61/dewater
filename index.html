@@ -356,11 +356,14 @@
         in layered soil water moves far more easily sideways than down (k<sub>h</sub> several times
         k<sub>v</sub>). The water table then lags the heads at depth, and catches up in about
         4 S<sub>y</sub> H / k<sub>v</sub> (Neuman's delayed yield), given in the results. When the
-        deadline is short against that time, the design is optimistic: a model of a ring of wells in
-        radius and depth needed about 10% more pumping when the deadline was a third of that time, and
-        25 to 60% more when it was a tenth or less. The app warns when the deadline is under half of
-        that time; it does not correct the design. For a site where it matters, check the design with a
-        layered numerical model.</p>
+        deadline is short against that time, the design is optimistic. A sweep of 108 models of a ring
+        of wells in radius and depth (thickness 10 to 60 m, k<sub>h</sub> 10⁻⁶ to 10⁻⁴ m/s, S<sub>y</sub>
+        0.1 and 0.25, k<sub>h</sub>/k<sub>v</sub> 1 and 10, rings of 25 to 200 m) put the extra pumping
+        on one curve against the deadline over that time: at worst about 5% at 1, 9% at ½, 14% at ⅓,
+        22% at 0.2, 40% at 0.1, and 70% at 0.05. The app takes that worst case as a margin: when it
+        reaches 10%, the status warns and the results give a suggested pump capacity, the starting
+        rate plus the margin. It does not change the design. For a site where it matters, check the
+        design with a layered numerical model.</p>
       <h3>A cutoff wall</h3>
       <p>A slurry cutoff wall around the site, keyed into the low-k layer, cuts off the inflow:
         water reaches the inside only through the wall. Placed around the site, the wall is a rectangle
@@ -441,6 +444,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-  <script type="module" src="js/app.js?v=81"></script>
+  <script type="module" src="js/app.js?v=82"></script>
 </body>
 </html>
