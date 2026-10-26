@@ -1022,7 +1022,7 @@ function drawResults() {
       const flush = () => {
         if (seg.length > 2) {
           const ll = seg.map(toWorld);
-          L.polyline(ll, { pane: "results", color: major ? "#E8582C" : "#1d2733", weight: major ? 2.5 : 1, opacity: 0.85, interactive: false }).addTo(lines);
+          L.polyline(ll, { pane: "results", color: major ? "#E8582C" : "#1d2733", weight: major ? 2.5 : 1, opacity: 0.85, dashArray: major ? "7,5" : null, interactive: false }).addTo(lines);
           exportLines.push({ value: c.value, coords: ll.map((q) => [q.lng, q.lat]) });
           if (seg.length > 12) {
             L.tooltip({ permanent: true, direction: "center", className: "contour-label", interactive: false })
@@ -1054,12 +1054,19 @@ function drawResults() {
   }
 
   // legend
+  const key = (svg, t) => `<div class="key"><svg class="sw" width="24" height="14" viewBox="0 0 24 14">${svg}</svg>${t}</div>`;
   const stops = d3.range(0, 1.0001, 0.1).map((t) => color(drier ? lo + t * (hi - lo) : hi - t * (hi - lo)));
   $("legend").innerHTML = `<h4>${title}</h4><div class="bar" style="background:linear-gradient(to right, ${stops.join(",")})"></div>`
     + `<div class="ticks"><span>${fmt(drier ? lo : hi, 1)}</span><span>${fmt(drier ? hi : lo, 1)}</span></div>`
-    + `<div class="key"><span class="sw" style="background:#E8582C;height:3px"></span>Required level</div>`
+    // every mark on the map, each with its key
+    + key(`<rect x="2" y="2" width="20" height="10" fill="rgba(232,88,44,.12)" stroke="#E8582C" stroke-width="2.5"/>`, "Excavation")
+    + key(`<circle cx="12" cy="7" r="5" fill="#1F4E79" stroke="#fff" stroke-width="2"/><circle cx="12" cy="7" r="6.2" fill="none" stroke="#1F4E79" stroke-width="1"/>`, "Pumping well")
+    + (last.wall ? key(`<line x1="1" y1="7" x2="23" y2="7" stroke="#fff" stroke-width="7"/><line x1="1" y1="7" x2="23" y2="7" stroke="#3d4550" stroke-width="4"/>`, "Cutoff wall") : "")
+    + key(`<line x1="1" y1="7" x2="23" y2="7" stroke="#1d2733" stroke-width="1"/>`, `Contours, labeled in ${Ln()}`)
+    + key(`<line x1="1" y1="7" x2="23" y2="7" stroke="#E8582C" stroke-width="2.5" stroke-dasharray="7,5"/>`, "Water at the required level (excavation bottom plus any extra depth)")
     + ($("in-dewatered").checked ? `<div class="key"><span class="sw" style="background:rgba(47,168,102,.35);border:1px dashed #1e7a46"></span>Below the required level</div>` : "")
-    + (last.hw && last.hw.some((v) => v <= 0) ? `<div class="key"><span class="sw dot" style="background:#b3261e"></span>Well pumped dry</div>` : "")
+    + (last.hw && last.hw.some((v) => v <= 0) ? key(`<circle cx="12" cy="7" r="5" fill="#b3261e" stroke="#fff" stroke-width="2"/><circle cx="12" cy="7" r="6.2" fill="none" stroke="#b3261e" stroke-width="1"/>`, "Well pumped dry") : "")
+    + (state.section ? key(`<line x1="1" y1="7" x2="23" y2="7" stroke="#1d2733" stroke-width="2.5" stroke-dasharray="6,4"/>`, "Cross section line A–A′") : "")
     + (last.at && last.hmax > p.target ? `<div class="key"><span class="sw dot" style="border:2.5px solid #b3261e"></span>Highest water in the excavation</div>` : "")
     + (last.bar ? [["wait", "Time bar: still drawing down"], ["dew", "Time bar: dewatered"], ["dry", "Time bar: a well is dry"]]
       .filter(([k]) => last.bar.includes(k)).map(([k, t]) => `<div class="key"><span class="sw" style="background:${BAR[k]};height:6px;border-radius:3px"></span>${t}</div>`).join("") : "");
@@ -1250,6 +1257,7 @@ function setSection(a, b) {
   map.invalidateSize();
   $("btn-sec-close").hidden = false;
   drawSection();
+  if (state.last) drawResults();          // the legend gains the section line's key
   persist();
 }
 function hideSection() {
@@ -1259,6 +1267,7 @@ function hideSection() {
   $("divider").hidden = true;
   map.invalidateSize();
   $("btn-sec-close").hidden = true;
+  if (state.last) drawResults();
   persist();
 }
 // A line through the excavation's middle (or the wells'), east–west or north–south, reaching

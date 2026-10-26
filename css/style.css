@@ -83,7 +83,9 @@ details.sub .fields { margin: 8px 0; }
 .legend .bar { height: 10px; border-radius: 3px; }
 .legend .ticks { display: flex; justify-content: space-between; color: var(--muted); margin-top: 2px; }
 .legend .key { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
-.legend .sw { width: 16px; height: 10px; border-radius: 2px; }
+.legend .sw { width: 16px; height: 10px; border-radius: 2px; flex: none; }
+.legend svg.sw { width: 24px; height: 14px; border-radius: 0; }
+.legend { max-width: 260px; }
 .legend .sw.dot { width: 12px; height: 12px; border-radius: 50%; box-sizing: border-box; margin: 0 2px; }
 .maptip { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 600; background: var(--ink); color: #fff; font-size: 13px; padding: 6px 12px; border-radius: 6px; pointer-events: none; }
 
