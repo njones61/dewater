@@ -556,7 +556,7 @@ $("btn-generate").onclick = () => {
   clearWells();
   ringWells(n, off).forEach((ll) => addWell(ll, false));
   updateWellsInfo();
-  if (state.section && state.secDir) centerSection(state.secDir);   // the section follows the new wells
+  followSection();
   schedule();
 };
 
@@ -639,7 +639,7 @@ $("btn-layout").onclick = () => {
       const b = Math.floor((n - 2 * best.a) / 2);
       const gain = ev.met && best.met ? ` ${fmt(100 * (1 - best.Q / ev.Q), 1)}% less pumping than the even ring.` : !ev.met && best.met ? " The even ring can't meet the deadline; this one can." : "";
       updateWellsInfo(best === ev ? "The even ring is already the best layout." : `Optimized: ${n - 2 * b - best.a === best.a ? `${best.a} on each long side` : `${n - 2 * b - best.a} and ${best.a} on the long sides`}, ${b} on each end.${gain}`);
-      if (state.section && state.secDir) centerSection(state.secDir);
+      followSection();
       persist();
       $("btn-optimize").click();                 // the design rate for the new layout
     };
@@ -1423,6 +1423,13 @@ function centerSection(dir) {
   setSection(toLL(a), toLL(b));
   state.secDir = dir;                     // so a new ring of wells redraws it through them
   persist();
+}
+// A new ring of wells: the open section is drawn again through them, east–west or north–south as
+// it was (for a line drawn by hand, or saved before the direction was kept, whichever it is closer to)
+function followSection() {
+  if (!state.section) return;
+  const [a, b] = state.section.map(toXY);
+  centerSection(state.secDir || (Math.abs(b.x - a.x) >= Math.abs(b.y - a.y) ? "ew" : "ns"));
 }
 $("btn-sec-ew").onclick = () => centerSection("ew");
 $("btn-sec-ns").onclick = () => centerSection("ns");
