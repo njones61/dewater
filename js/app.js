@@ -890,7 +890,7 @@ function run() {
     if (outside) rows.push(["Wells outside the wall", outside]);
   }
   if (sched) {
-    rows.push(["Starting rate, Q", fmtQ(p.Q)]);
+    rows.push(["Pumping rate at the start, Q", fmtQ(p.Q)]);
     if (state.viewT) rows.push([`Rate on day ${dayN(p.t)}`, fmtQ(qNow)]);
   } else rows.push(["Rate per well", fmtQ(qEach)], ["Total rate, Q", fmtQ(p.Q)]);
   const st = p.site;
@@ -1730,9 +1730,9 @@ function syncCurveInputs() {
   $("curve-n").hidden = v !== "n"; $("curve-k").hidden = v !== "k"; $("curve-t").hidden = v !== "t";
   document.querySelectorAll(".uK").forEach((e) => (e.textContent = kUnitLabel()));
   const tr = flow() === "transient" && !$("in-wall").checked;
-  if (tr) return void ($("curve-hint").textContent = v === "n" ? "The starting rate for the deadline (step 2) against the number of wells, and the fewest wells that can meet it."
-    : v === "t" ? "The starting rate, and the water pumped to dewater, against the deadline, for the wells on the map. The shortest deadline the wells can meet is marked."
-    : "The starting rate for the deadline (step 2) against k, for the wells on the map: what a wrong guess at k costs.");
+  if (tr) return void ($("curve-hint").textContent = v === "n" ? "Q\u2098\u1d62\u2099, the minimum design pumping rate for the deadline (step 2), against the number of wells, and the fewest wells that can meet it."
+    : v === "t" ? "Q\u2098\u1d62\u2099, the minimum design pumping rate, and the water pumped to dewater, against the deadline, for the wells on the map. The shortest deadline the wells can meet is marked."
+    : "Q\u2098\u1d62\u2099, the minimum design pumping rate for the deadline (step 2), against k, for the wells on the map: what a wrong guess at k costs.");
   $("curve-hint").textContent = v === "n" ? "Past some n, more wells barely lower Q."
     : v === "t" ? "For the wells on the map (or the cutoff wall), with transient flow: the less time allowed, the more pumping."
     : "For the wells on the map. With R entered, Q is simply proportional to k; choose Sichardt or Kusakin for R to see how R's growth with k changes that.";
@@ -1910,10 +1910,10 @@ function drawDeadlineCurve() {
   const ok = curveRows.filter((r) => r.met && isFinite(r.Q)), miss = curveRows.filter((r) => !r.met);
   const xv = (r) => (byK ? r.x / ku : byT ? r.x / 86400 : r.x);
   const xName = byK ? "hydraulic conductivity" : byT ? "deadline" : "number of wells";
-  $("curve-title").innerHTML = `Design curve: starting rate vs. ${xName}`;
+  $("curve-title").innerHTML = `Design curve: Q<sub>min</sub> vs. ${xName}`;
   const tdN = dayN(state.curveTd), nw = state.wells.length;
   const setup = byT ? `The ${nw} wells on the map` : byK ? `The ${nw} wells on the map, dewatering by day ${tdN}` : `Rings at ${fmt(parseFloat($("in-offset").value), 1)} ${Ln()} from the edge, dewatering by day ${tdN}`;
-  const explain = ` Each point is the design for the deadline: the smallest starting rate that dewaters the excavation in time, cut back weekly where a well would otherwise go dry. After that a lower rate holds the water down.`;
+  const explain = ` Each point is the design for the deadline: Q<sub>min</sub>, the smallest pumping rate at the start that dewaters the excavation in time, cut back weekly where a well would otherwise go dry. After that a lower rate holds the water down.`;
   const missNote = byT ? (state.curveFast ? ` The wells can't dewater in less than ${dayN(state.curveFast)} days, even pumping as hard as they can without going dry.` : "") : !miss.length ? ""
     : byK ? ` For ${miss.length} of ${curveRows.length} values of k (${fmtNum(xv(miss[0]))} to ${fmtNum(xv(miss[miss.length - 1]))} ${kUnitLabel()}) the wells can't meet the deadline at any rate; they are left off.`
     : ` With ${miss.length > 2 && miss[miss.length - 1].x - miss[0].x === miss.length - 1 ? `${miss[0].x} to ${miss[miss.length - 1].x}` : miss.map((r) => r.x).join(", ")} wells the deadline can't be met at any rate; they are left off.`;
@@ -1972,7 +1972,7 @@ function drawDeadlineCurve() {
     .attr("fill", (r) => (r.capped ? CUT : "#1F4E79"))
     .append("title").text((r) => `${byK ? `k = ${fmtNum(xv(r))} ${kUnitLabel()}` : byT ? `Day ${fmtNum(xv(r))}` : `${r.x} wells`}: start at ${fmtNum(r.Q / uq)} ${unit}${r.capped ? ", cut back weekly" : ", constant until dewatered"}; dewatered on day ${dayN(r.tDew)}; ${fmtVol(r.vol)} pumped to dewater`);
   svg.append("text").attr("class", "axis-title").attr("x", (m.l + W - m.r) / 2).attr("y", H - 8).attr("text-anchor", "middle").text(byK ? `Hydraulic conductivity, k (${kUnitLabel()})` : byT ? "Deadline, days to dewater" : "Number of wells, n");
-  svg.append("text").attr("class", "axis-title").attr("transform", `translate(16,${(m.t + H - m.b) / 2}) rotate(-90)`).attr("text-anchor", "middle").text(`Starting rate, Q (${unit})`);
+  svg.append("text").attr("class", "axis-title").attr("transform", `translate(16,${(m.t + H - m.b) / 2}) rotate(-90)`).attr("text-anchor", "middle").text(`Q\u2098\u1d62\u2099, minimum design pumping rate (${unit})`);
 }
 $("btn-curve-csv").onclick = () => {
   const u = Qn().replace("³", "3").replace("/", "_per_"), ku = K_UNITS[$("in-k-unit").value], kn = kUnitLabel().replace("/", "_per_");

@@ -16,7 +16,7 @@ Design a dewatering well system for an excavation in an unconfined aquifer, in t
 6. Check cross sections of the water level: east–west, north–south, or along any line you draw.
 7. Compute the design curves: Q_min against the number of wells, to choose how many wells to
    use; against k; or against the days to dewater. In transient flow each point is the design
-   for the deadline (the starting rate, cut back where needed), and the curves mark the fewest
+   for the deadline (Q_min at the start, cut back where needed), and the curves mark the fewest
    wells and the shortest deadline the wells can meet.
 
 The ground elevation can be read from open terrain data (AWS Terrain Tiles; USGS 3DEP in the
@@ -60,7 +60,7 @@ rate that dewaters the excavation by day t is exact. A time bar under the map pl
 through time, on one scale. The pumping follows one schedule, adjusted weekly (rate changes add
 in time, as in a recovery test): Q until the excavation is dewatered, cut back only where a well
 would otherwise go dry, then stepped down to the lowest rate that holds the water at the required
-level for the next four weeks. *Find Q_min* gives the smallest starting rate that meets the
+level for the next four weeks. *Find Q_min* gives the smallest pumping rate at the start that meets the
 deadline, or, when the wells can't, the fastest they can do; *Pumping schedule* plots the rates
 and gives the water pumped. Transient is the default: the deadline sets the rate.
 
@@ -70,7 +70,7 @@ anisotropy kh/kv, the app reports that time. A sweep of 108 radius-and-depth mod
 wells (thickness 10 to 60 m, kh 1e-6 to 1e-4 m/s, Sy 0.1 and 0.25, kh/kv 1 and 10, rings of 25 to
 200 m) put the extra pumping on one curve against the deadline over that time; the app takes its
 worst case as a margin (about 9% at 1/2, 14% at 1/3, 40% at 0.1), warns when it reaches 10%, and
-gives a suggested pump capacity, the starting rate plus the margin. It does not change the design.
+gives a suggested pump capacity, Q_min plus the margin. It does not change the design.
 
 This is a screening tool for teaching and preliminary design.
 

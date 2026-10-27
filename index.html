@@ -338,12 +338,12 @@
         only as far as needed to keep every well from going dry; the wells can take much more at
         the start than later, as the cone deepens. <i>Hold:</i> once the excavation is dewatered,
         step down to the lowest rate that holds the water at the required level for the next four
-        weeks. <b>Find Q<sub>min</sub></b> gives the smallest starting rate that meets the deadline
+        weeks. <b>Find Q<sub>min</sub></b> gives the smallest pumping rate at the start that meets the deadline
         (the constant rate, when the wells can deliver it), or, if the wells can't meet it, the
         fastest they can do and the day it takes. <b>Pumping schedule</b> plots the steps and gives
         the water pumped. The results give the day the excavation is dewatered, the bar
         under the map plays the contours and the section through time (up to twice the design
-        day). The design curves plot the starting rate of the deadline design against the number
+        day). The design curves plot Q<sub>min</sub>, the minimum design pumping rate, against the number
         of wells (marking the fewest that can meet the deadline), against k (what a wrong guess at
         k costs), and against the deadline, with the water pumped to dewater (marking the
         shortest deadline the wells can meet). S<sub>y</sub> is taken as
@@ -428,7 +428,7 @@
         <li>Use the design curves: Q<sub>min</sub> against the number of wells (rings at the
           offset), against k for the wells on the map (or for the wall), or against the days to
           dewater (transient flow, or the wall). In transient flow each point is the design for
-          the deadline: the starting rate, cut back weekly where a well would otherwise go dry.</li>
+          the deadline: Q<sub>min</sub> at the start, cut back weekly where a well would otherwise go dry.</li>
       </ol>
       <p class="hint">Units: lengths are in meters or feet (the switch at the top of the panel);
         k and Q each have their own unit, and every flow rate in the results, the design curve,
@@ -444,6 +444,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-  <script type="module" src="js/app.js?v=85"></script>
+  <script type="module" src="js/app.js?v=86"></script>
 </body>
 </html>
